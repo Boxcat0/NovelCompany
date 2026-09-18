@@ -1,0 +1,213 @@
+:root {
+  font-family: "Segoe UI", sans-serif;
+  color: #202838;
+  background: #f4f7fa;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 760px;
+}
+
+.desktop-app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.app-header {
+  display: flex;
+  min-height: 64px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  border-bottom: 1px solid #cbd4e0;
+  background: #ffffff;
+}
+
+.app-brand {
+  color: #1e385c;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.build-status {
+  color: #617087;
+  font-size: 14px;
+}
+
+.settings-button,
+.nav-item {
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.settings-button {
+  padding: 8px 13px;
+  border: 1px solid #bac6d6;
+  border-radius: 6px;
+  color: #2d405d;
+  background: #ffffff;
+}
+
+.settings-button:hover {
+  background: #f2f5f9;
+}
+
+.app-body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+}
+
+.sidebar {
+  display: flex;
+  width: 208px;
+  flex: 0 0 208px;
+  flex-direction: column;
+  gap: 4px;
+  padding: 18px 12px;
+  border-right: 1px solid #cbd4e0;
+  background: #f7f9fc;
+}
+
+.nav-item {
+  padding: 11px 12px;
+  border-radius: 6px;
+  color: #4a5b73;
+  background: transparent;
+  text-align: left;
+}
+
+.nav-item:hover {
+  background: #e8eef7;
+}
+
+.nav-item.is-active {
+  color: #17365f;
+  font-weight: 700;
+  background: #dce9f9;
+}
+
+.main-content {
+  min-width: 0;
+  flex: 1;
+  padding: 32px;
+  background: #eef2f7;
+}
+
+.content-panel {
+  min-height: 260px;
+  padding: 32px;
+  border: 1px solid #d5dde8;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgb(30 48 75 / 6%);
+}
+
+.section-label {
+  margin: 0 0 8px;
+  color: #607594;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+h1 {
+  margin: 0;
+  color: #1e2e45;
+  font-size: 28px;
+}
+
+.placeholder-message {
+  margin: 16px 0 0;
+  color: #627086;
+  font-size: 16px;
+}
+
+.work-list {
+  display: grid;
+  gap: 12px;
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.work-card {
+  padding: 18px;
+  border: 1px solid #d5dde8;
+  border-radius: 8px;
+  background: #f9fbfd;
+}
+
+.work-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.work-card h2 {
+  margin: 0;
+  color: #2a3a53;
+  font-size: 18px;
+}
+
+.work-card p {
+  margin: 10px 0 0;
+  color: #627086;
+}
+
+.work-status {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border-radius: 999px;
+  color: #285b45;
+  background: #dff1e7;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.episode-list {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.episode-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.episode-number {
+  color: #4a5b73;
+  font-weight: 700;
+}
+
+.episode-title {
+  flex: 1;
+  color: #2a3a53;
+}
+
+.episode-status {
+  flex: 0 0 auto;
+  color: #617087;
+  font-size: 13px;
+  font-weight: 700;
+}
