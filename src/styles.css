@@ -47,7 +47,10 @@ body {
 }
 
 .settings-button,
-.nav-item {
+.nav-item,
+.work-card-button,
+.episode-button,
+.back-button {
   border: 0;
   font: inherit;
   cursor: pointer;
@@ -144,10 +147,23 @@ h1 {
 }
 
 .work-card {
-  padding: 18px;
+  overflow: hidden;
   border: 1px solid #d5dde8;
   border-radius: 8px;
   background: #f9fbfd;
+}
+
+.work-card-button {
+  width: 100%;
+  padding: 18px;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+}
+
+.work-card-button:hover,
+.episode-button:hover {
+  background: #eef4fb;
 }
 
 .work-card-header {
@@ -157,14 +173,15 @@ h1 {
   gap: 16px;
 }
 
-.work-card h2 {
-  margin: 0;
+.work-title {
   color: #2a3a53;
   font-size: 18px;
+  font-weight: 700;
 }
 
-.work-card p {
-  margin: 10px 0 0;
+.work-description {
+  display: block;
+  margin-top: 10px;
   color: #627086;
 }
 
@@ -187,12 +204,20 @@ h1 {
 }
 
 .episode-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
+  overflow: hidden;
   border-radius: 6px;
   background: #ffffff;
+}
+
+.episode-button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  color: inherit;
+  background: transparent;
+  text-align: left;
 }
 
 .episode-number {
@@ -210,4 +235,209 @@ h1 {
   color: #617087;
   font-size: 13px;
   font-weight: 700;
+}
+
+.back-button {
+  margin-bottom: 18px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  color: #365778;
+  background: #edf3f9;
+}
+
+.back-button:hover {
+  background: #dfeaf5;
+}
+
+.error-message {
+  margin: 16px 0 0;
+  color: #a33a3a;
+}
+
+.viewer-header {
+  padding-bottom: 20px;
+  border-bottom: 1px solid #d5dde8;
+}
+
+.viewer-layout {
+  display: grid;
+  grid-template-columns: minmax(210px, 0.32fr) minmax(0, 1fr);
+  gap: 28px;
+}
+
+.viewer-episode-navigation {
+  min-width: 0;
+  padding-right: 20px;
+  border-right: 1px solid #d5dde8;
+}
+
+.viewer-episode-list {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.viewer-episode-button {
+  display: grid;
+  width: 100%;
+  gap: 3px;
+  padding: 11px 12px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.viewer-episode-button:hover {
+  background: #eef4fb;
+}
+
+.viewer-episode-button.is-selected {
+  border-color: #b6cbe6;
+  background: #dce9f9;
+}
+
+.viewer-episode-number,
+.viewer-episode-status {
+  color: #617087;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.viewer-episode-title {
+  overflow: hidden;
+  color: #2a3a53;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewer-content-panel {
+  min-width: 0;
+}
+
+.viewer-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.viewer-header-episode-number {
+  margin: 8px 0 0;
+  color: #627086;
+}
+
+.viewer-metadata {
+  margin: 12px 0 0;
+  color: #617087;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.episode-content {
+  max-width: 780px;
+  max-height: calc(100vh - 330px);
+  overflow: auto;
+  margin: 24px auto 0;
+  padding: 28px 32px;
+  border: 1px solid #e0e6ee;
+  border-radius: 8px;
+  color: #2b3442;
+  background: #fbfcfe;
+  font-family: inherit;
+  font-size: 16px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.concept-layout {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.28fr) minmax(0, 1fr);
+  gap: 24px;
+  margin-top: 24px;
+}
+
+.concept-set-navigation {
+  padding-right: 20px;
+  border-right: 1px solid #d5dde8;
+}
+
+.concept-set-list {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.concept-set-button {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #2a3a53;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.concept-set-button:hover,
+.concept-set-button.is-selected {
+  background: #dce9f9;
+}
+
+.concept-set-button.is-selected {
+  border-color: #b6cbe6;
+  font-weight: 700;
+}
+
+.concept-definition h2 {
+  margin: 0;
+  color: #2a3a53;
+}
+
+.concept-field-list {
+  display: grid;
+  gap: 10px;
+  margin: 22px 0 0;
+}
+
+.concept-field {
+  padding: 12px;
+  border: 1px solid #e0e6ee;
+  border-radius: 7px;
+  background: #fbfcfe;
+}
+
+.concept-field dt {
+  color: #2a3a53;
+  font-weight: 700;
+}
+
+.concept-field dd {
+  margin: 6px 0 0;
+  color: #617087;
+}
+
+@media (max-width: 900px) {
+  .viewer-layout {
+    grid-template-columns: 210px minmax(0, 1fr);
+    gap: 20px;
+  }
+
+  .episode-content {
+    padding: 22px 24px;
+  }
+
+  .concept-layout {
+    grid-template-columns: 180px minmax(0, 1fr);
+  }
 }

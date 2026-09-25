@@ -5,6 +5,7 @@ const {
   getWorksDirectory,
   getWorkEpisodesDirectory,
   getEpisodeFilePath,
+  getEpisodeFilePathByStorageKey,
 } = require("./storage-paths.cjs");
 
 function assertWorkId(workId) {
@@ -55,6 +56,16 @@ class LocalEpisodeStorage extends EpisodeStorage {
     assertWorkId(workId);
     return fs.readFile(
       getEpisodeFilePath(this.dataRoot, workId, episodeNumber),
+      "utf8",
+    );
+  }
+
+  /**
+   * 검증된 논리 storage key를 로컬 작품 폴더 안의 UTF-8 TXT 파일로 해석해 읽는다.
+   */
+  async readEpisodeByStorageKey(storageKey) {
+    return fs.readFile(
+      getEpisodeFilePathByStorageKey(this.dataRoot, storageKey),
       "utf8",
     );
   }

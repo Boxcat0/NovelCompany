@@ -2,7 +2,7 @@
 
 ## 1. 목적과 범위
 
-이 문서는 향후 SQLite 도입에 사용할 논리 데이터 모델과 TXT 파일 저장소의 경계를 정의한다. 현재는 설계와 문서화 단계다. SQLite 패키지, `.db` 파일, SQL, 마이그레이션, Repository, CRUD, DB IPC와 DB UI는 구현하지 않는다.
+이 문서는 SQLite Schema v1과 CanonSpace scope migration의 논리 데이터 모델 및 TXT 파일 저장소 경계를 정의한다. `node:sqlite`로 `C:\NovelCompanyData\novelcompany.db`를 생성하고 순차 migration을 적용한다. Work/Episode Repository와 읽기 전용 IPC/UI는 구현되어 있으며, Canon Repository, Canon IPC와 Canon CRUD UI는 구현하지 않는다.
 
 ## 2. TXT Source of Truth
 
@@ -24,6 +24,8 @@ C:\NovelCompanyData
 SQLite는 소설 원문이 아닌 구조화된 정보와 관리 정보를 저장한다. 여기에는 Work/Episode 메타데이터, Canon, Story Bible 데이터, Memory, Proposal, Workflow, Employee, AI Usage, Illustration metadata가 포함된다.
 
 File Storage는 TXT와 이미지 같은 실제 파일을 보관한다. 현재 `LocalEpisodeStorage`가 로컬 TXT 파일을 담당하며, 미래에는 같은 Storage 계약을 구현하는 Cloud Storage로 교체할 수 있다.
+
+SQLite는 Electron Main Process에서만 열며 `PRAGMA foreign_keys = ON` 후 `schema_migrations`를 사용해 번호순 SQL migration을 적용한다. Schema v1은 Work, Episode와 Canon 기반의 기본 관계만 포함하며, Renderer에는 DB 객체를 노출하지 않는다.
 
 ## 4. Canon과 주요 용어
 
@@ -79,26 +81,15 @@ updated_at
 
 ### World, World Rule, Location, Organization
 
+아래 Modern Fantasy Canon table은 migration 002 기준 실제 구현이다. World Rule은 현재 별도 table로 구현하지 않는다.
+
 `worlds`
 
 ```text
 id
-work_id
+canon_space_id
 name
 description
-status
-created_at
-updated_at
-```
-
-`world_rules`
-
-```text
-id
-world_id
-name
-description
-status
 created_at
 updated_at
 ```
@@ -107,10 +98,10 @@ updated_at
 
 ```text
 id
+canon_space_id
 world_id
 name
 description
-status
 created_at
 updated_at
 ```
@@ -119,15 +110,15 @@ updated_at
 
 ```text
 id
+canon_space_id
 location_id
 name
 description
-status
 created_at
 updated_at
 ```
 
-World Rule은 World와 분리한다. 공간과 조직의 기본 관계는 다음과 같다.
+공간과 조직의 기본 관계는 다음과 같다.
 
 ```text
 World
@@ -135,7 +126,7 @@ World
           └──< Organization
 ```
 
-`locations.world_id`는 `worlds.id`를, `organizations.location_id`는 `locations.id`를 참조한다. 여러 지역에 지부를 둔 조직은 미래에 다대다 관계로 확장할 수 있으며 현재 모델에는 넣지 않는다.
+`locations.(canon_space_id, world_id)`는 같은 CanonSpace의 World를, `organizations.(canon_space_id, location_id)`는 같은 CanonSpace의 Location을 참조한다. 여러 지역에 지부를 둔 조직은 미래에 다대다 관계로 확장할 수 있으며 현재 모델에는 넣지 않는다.
 
 ### Character: 출신지, 현재 위치, 소속
 
@@ -143,14 +134,13 @@ World
 
 ```text
 id
-work_id
+canon_space_id
 name
 origin_world_id
 origin_location_id
 current_location_id
 organization_id
 description
-status
 created_at
 updated_at
 ```
@@ -163,7 +153,7 @@ Character
 └─ organization_id      현재 소속 조직
 ```
 
-Character는 Organization 하나만으로 공간 관계를 표현하지 않는다. `origin_location_id`가 가리키는 Location의 `world_id`는 `origin_world_id`와 일치해야 한다. 이 무결성 규칙은 다른 World의 Location을 출신지로 잘못 연결하지 않기 위한 것이며 실제 SQLite 강제 방식은 DB 구현 Task에서 결정한다. 현재 위치는 출신지와 다를 수 있고 스토리 진행에 따라 바뀔 수 있다.
+Character는 Organization 하나만으로 공간 관계를 표현하지 않는다. `origin_location_id`가 가리키는 Location의 `world_id`는 `origin_world_id`와 일치해야 하며, 두 참조는 Character와 같은 CanonSpace에 있어야 한다. 이 규칙은 SQLite 복합 Foreign Key로 강제한다. 현재 위치는 출신지와 다를 수 있고 스토리 진행에 따라 바뀔 수 있다.
 
 ### Skill, Relationship, Timeline, Item
 
@@ -171,15 +161,14 @@ Character는 Organization 하나만으로 공간 관계를 표현하지 않는�
 
 ```text
 id
-work_id
+canon_space_id
 name
 description
-status
 created_at
 updated_at
 ```
 
-Character와 Skill은 다대다 관계를 지원하도록 `character_skills(character_id, skill_id)`를 둔다. Skill을 Character의 단순 문자열 필드로 고정하지 않는다.
+Character와 Skill은 `character_skills(canon_space_id, character_id, skill_id)` 다대다 관계를 지원한다. 복합 Foreign Key가 Character와 Skill의 CanonSpace 일치를 강제한다.
 
 추가 Canon 관리 대상의 논리 모델은 `items`, `relationships`, `timeline_events`다. 각 모델은 Work 또는 관련 Canon 엔터티를 참조하도록 구체화한다.
 
@@ -309,6 +298,26 @@ updated_at
 
 이미지 파일 자체는 SQLite에 넣지 않는다. 실제 PNG 등의 파일은 File Storage에 두고 SQLite에는 파일을 찾고 관리하기 위한 metadata만 둔다.
 
+## CanonSpace scope migration
+
+Migration 002부터 Canon은 Work에 직접 연결하지 않고 CanonSpace를 통해 간접 귀속된다.
+
+```text
+Work 1 : 0..1 CanonSpace
+
+Work
+  └─ CanonSpace (template_key = MODERN_FANTASY_V1)
+      └─ Canon Entities
+```
+
+`canon_spaces.work_id`는 `works.id`를 `ON DELETE RESTRICT`로 참조하며 `UNIQUE(work_id)`로 한 Work당 하나의 CanonSpace만 허용한다. 현재 `template_key`는 `MODERN_FANTASY_V1`만 허용한다.
+
+World, Location, Organization, Character, Attribute, Skill, Authority, Servant, Contract, Passive, CharacterRelationship 및 Character 연결 테이블은 모두 필수 `canon_space_id`를 가진다. Canon Entity는 `work_id`를 직접 저장하지 않는다. 복합 Foreign Key가 같은 CanonSpace 내부 참조만 허용해 교차 Canon 연결을 차단한다.
+
+기존 Canon 데이터가 있는 001 DB는 소유 Work를 안전하게 추론할 수 없으므로 migration 002가 transaction 전체를 rollback한다. 기존 Canon을 자동 재귀속하거나 삭제하지 않는다.
+
+현재 구현 Canon 모델은 `MODERN_FANTASY_V1`만 지원하며, 다른 장르·Shared Universe·Canon 상속·Fork·Template은 구현하지 않는다.
+
 ## 6. Episode와 TXT Storage 관계
 
 ```text
@@ -376,12 +385,21 @@ Canon은 별도 단일 테이블이 아니라 작가가 승인한 World, Charact
 
 > File Storage = TXT와 이미지 등의 실제 파일
 
+## 10. Generic Canon Definition (Task016)
+
+Migration 003은 기존의 고정 Canon 테이블을 바꾸지 않고, Work별 CanonSpace 안에 사용자 정의가 가능한 범용 정의 계층을 추가한다.
+
+Work → CanonSpace → CanonSet → CanonField → CanonFieldOption
+
+CanonRecord는 CanonFieldValue, CanonRecordOptionValue, CanonRecordReference로 향후 실제 Canon 값을 저장한다. 모든 관계는 canon_space_id를 포함한 복합 Foreign Key로 같은 CanonSpace 안에만 참조되도록 제한한다. 정의와 레코드는 분리되어 있으며, 이번 단계의 초기 설정은 definition만 만들고 CanonRecord를 seed하지 않는다.
+
+초기 템플릿 MODERN_FANTASY_V1은 11개 Set(세계, 지역, 조직, 속성, 스킬, 캐릭터, 권능, 권속, 패시브, 계약, 관계)과 각 Field/Option을 정의한다. 이 템플릿의 실제 레코드 작성과 수정은 이후 author approval 기반 기능의 범위다.
+
 ## 9. 향후 구현으로 미루는 항목
 
-- SQLite 패키지 설치, 실제 `.db` 파일, SQL `CREATE TABLE`, 마이그레이션, Repository, CRUD, DB IPC와 DB UI
+- Repository, CRUD API, DB IPC와 DB UI
 - `storage_key`와 `content_hash`의 실제 저장·생성·비교
 - Canon 승인 처리, Proposal 반영, Workflow 실행
 - AI Agent, AI Usage 수집과 비용 계산
 - Cloud Storage, PC 간 동기화, 충돌 해결, 파일 버전 관리
 - Organization 다중 지부를 위한 다대다 확장
-

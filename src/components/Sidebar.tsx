@@ -1,8 +1,14 @@
-export type NavigationItem = "company" | "works" | "employees" | "settings";
+export type NavigationItem =
+  | "company"
+  | "works"
+  | "concept"
+  | "employees"
+  | "settings";
 
 const navigationItems: Array<{ id: NavigationItem; label: string }> = [
   { id: "company", label: "회사" },
   { id: "works", label: "작품" },
+  { id: "concept", label: "컨셉정리" },
   { id: "employees", label: "직원" },
   { id: "settings", label: "설정" },
 ];

@@ -2,6 +2,7 @@ import { useState } from "react";
 import Header from "./components/Header";
 import Sidebar, { type NavigationItem } from "./components/Sidebar";
 import CompanyScreen from "./screens/CompanyScreen";
+import ConceptScreen from "./screens/ConceptScreen";
 import EmployeesScreen from "./screens/EmployeesScreen";
 import SettingsScreen from "./screens/SettingsScreen";
 import WorksScreen from "./screens/WorksScreen";
@@ -9,6 +10,7 @@ import WorksScreen from "./screens/WorksScreen";
 const screens: Record<NavigationItem, React.ComponentType> = {
   company: CompanyScreen,
   works: WorksScreen,
+  concept: ConceptScreen,
   employees: EmployeesScreen,
   settings: SettingsScreen,
 };

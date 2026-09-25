@@ -9,6 +9,10 @@
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on tcp:5173 && electron .\"",
     "start": "electron .",
     "typecheck": "tsc --noEmit",
+    "test:database": "node electron/database/database-validation.cjs",
+    "test:repository": "node electron/database/repository-validation.cjs",
+    "test:ipc": "node electron/ipc/ipc-validation.cjs",
+    "setup:initial-canon": "node electron/database/setup/setup-initial-novel-canon.cjs",
     "build": "npm run typecheck && vite build",
     "package": "npm run build && electron-builder --win"
   },
