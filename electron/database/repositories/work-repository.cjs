@@ -55,6 +55,14 @@ function requireWorkStatus(status) {
   return status;
 }
 
+/** 선택 설명은 문자열 또는 null만 허용하고 기존 공백/빈 문자열 정책을 유지한다. */
+function requireDescription(description) {
+  if (description !== null && typeof description !== "string") {
+    throw new RepositoryError("WORK_DESCRIPTION_INVALID", "작품 설명은 글로 입력해 주세요.");
+  }
+  return description;
+}
+
 /**
  * 예상하지 못한 SQLite 쓰기 오류를 사용자용 한국어 메시지로 감싼다.
  */
@@ -67,9 +75,13 @@ function toWorkWriteError(error) {
 }
 
 /**
- * UUID와 UTC 시각을 생성해 새 작품 metadata를 저장한다.
+ * 입력을 검증하고 UUID와 UTC 시각으로 작품 metadata만 생성한다.
  */
-function createWork({ title, description = null, status = "ACTIVE" }) {
+function createWork(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new RepositoryError("WORK_TITLE_REQUIRED", "작품 제목을 입력해 주세요.");
+  }
+  const { title, description = null, status = "ACTIVE" } = input;
   const database = getDatabase();
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -79,7 +91,7 @@ function createWork({ title, description = null, status = "ACTIVE" }) {
       .prepare(
         "INSERT INTO works (id, title, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
       )
-      .run(id, requireTitle(title), description, requireWorkStatus(status), now, now);
+      .run(id, requireTitle(title), requireDescription(description), requireWorkStatus(status), now, now);
   } catch (error) {
     throw toWorkWriteError(error);
   }
@@ -127,7 +139,7 @@ function updateWork(id, changes) {
     return null;
   }
 
-  if (!changes || typeof changes !== "object") {
+  if (!changes || typeof changes !== "object" || Array.isArray(changes)) {
     throw new RepositoryError("WORK_UPDATE_REQUIRED", "수정할 작품 정보를 입력해 주세요.");
   }
 
@@ -138,7 +150,7 @@ function updateWork(id, changes) {
     ? requireWorkStatus(changes.status)
     : currentWork.status;
   const description = Object.hasOwn(changes, "description")
-    ? changes.description
+    ? requireDescription(changes.description)
     : currentWork.description;
   const updatedAt = new Date().toISOString();
 
@@ -155,4 +167,48 @@ function updateWork(id, changes) {
   return getWorkById(workId);
 }
 
-module.exports = { createWork, getAllWorks, getWorkById, updateWork };
+/** 작품 존재 여부와 회차 수/CanonSpace 유무를 한 조회로 확인해 삭제 가능 상태를 반환한다. */
+function getWorkDeletionStatus(id) {
+  const row = getDatabase().prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM episodes WHERE work_id = works.id) AS episode_count,
+      EXISTS (SELECT 1 FROM canon_spaces WHERE work_id = works.id) AS has_canon_space
+    FROM works WHERE id = ?
+  `).get(requireWorkId(id));
+  if (!row) throw new RepositoryError("WORK_NOT_FOUND", "작품을 찾을 수 없습니다.");
+  return {
+    canDelete: row.episode_count === 0 && row.has_canon_space === 0,
+    episodeCount: row.episode_count,
+    hasCanonSpace: row.has_canon_space === 1,
+  };
+}
+
+/** 실제 삭제 직전 의존성을 재검증하고 작품 행 하나만 transaction 안에서 삭제한다. */
+function deleteWork(id) {
+  const workId = requireWorkId(id);
+  const database = getDatabase();
+  let transactionStarted = false;
+  try {
+    database.exec("BEGIN IMMEDIATE");
+    transactionStarted = true;
+    const status = getWorkDeletionStatus(workId);
+    if (status.episodeCount > 0 && status.hasCanonSpace) {
+      throw new RepositoryError("WORK_DELETE_BLOCKED_BY_DEPENDENCIES", "이 작품에는 연결된 회차와 Canon 데이터가 있어 삭제할 수 없습니다.");
+    }
+    if (status.episodeCount > 0) {
+      throw new RepositoryError("WORK_DELETE_BLOCKED_BY_EPISODES", "이 작품에는 연결된 회차가 있어 삭제할 수 없습니다.");
+    }
+    if (status.hasCanonSpace) {
+      throw new RepositoryError("WORK_DELETE_BLOCKED_BY_CANON", "이 작품에는 Canon 데이터가 있어 삭제할 수 없습니다.");
+    }
+    database.prepare("DELETE FROM works WHERE id = ?").run(workId);
+    database.exec("COMMIT");
+    return { id: workId };
+  } catch (error) {
+    if (transactionStarted) database.exec("ROLLBACK");
+    if (error instanceof RepositoryError) throw error;
+    throw new RepositoryError("WORK_DELETE_FAILED", "작품을 삭제하지 못했습니다.", error);
+  }
+}
+
+module.exports = { createWork, getAllWorks, getWorkById, updateWork, getWorkDeletionStatus, deleteWork };

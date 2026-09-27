@@ -2,7 +2,7 @@
 
 ## 1. 목적과 범위
 
-이 문서는 SQLite Schema v1과 CanonSpace scope migration의 논리 데이터 모델 및 TXT 파일 저장소 경계를 정의한다. `node:sqlite`로 `C:\NovelCompanyData\novelcompany.db`를 생성하고 순차 migration을 적용한다. Work/Episode Repository와 읽기 전용 IPC/UI는 구현되어 있으며, Canon Repository, Canon IPC와 Canon CRUD UI는 구현하지 않는다.
+이 문서는 SQLite와 migration 001~005의 논리 데이터 모델 및 TXT 저장소 경계를 정의한다. `node:sqlite`로 `C:\NovelCompanyData\novelcompany.db`를 생성하고 순차 migration을 적용한다. 현재 Work 관리, Canon Record CRUD 및 CanonSpace 시작/삭제, Episode CRUD와 TXT 편집을 구현했다. CanonSet/Field 구조 편집과 틀 복사는 후속 범위다.
 
 ## 2. TXT Source of Truth
 
@@ -77,7 +77,9 @@ created_at
 updated_at
 ```
 
-`work_id`는 Work를 참조한다. 현재 TypeScript의 `Episode.workId` 관계를 SQLite에서도 유지한다. `storage_key`와 `content_hash`는 향후 필드이며 아직 생성·저장하지 않는다.
+`work_id`는 Work를 REFERENCES ... ON DELETE RESTRICT로 참조한다. `id`는 TEXT PRIMARY KEY UUID이며 번호 변경에도 유지한다. `episode_number`는 INTEGER NOT NULL CHECK (> 0), `(work_id, episode_number)`는 UNIQUE다. title은 TEXT NOT NULL, status는 DRAFT/IN_PROGRESS/COMPLETED CHECK, storage_key는 TEXT NOT NULL UNIQUE, content_hash는 nullable TEXT, created_at/updated_at은 TEXT NOT NULL이다. Task021은 기존 제약으로 충분하므로 migration을 추가하거나 001~004를 수정하지 않았다.
+
+Main은 safe positive integer 번호와 trim 후 비어 있지 않은 제목을 검사한다. 같은 작품의 중복 번호만 금지하고 다른 작품은 같은 번호를 허용한다. 목록은 번호 ASC, 삭제/변경 후 자동 재번호나 swap은 없다. 추천은 가장 작은 미사용 양의 정수이며 `[]→1`, `[1,2,4]→3`, `[2,3,4]→1`, `[1,3,5]→2`다. 예약이 아니므로 저장 transaction에서 중복을 다시 검사하고 DB UNIQUE도 유지한다.
 
 ### World, World Rule, Location, Organization
 
@@ -333,9 +335,9 @@ C:\NovelCompanyData\works\{workId}\episodes\005.txt
 
 `storage_key`는 절대 경로가 아닌 논리 저장 키다. 예를 들어 `work-001/episodes/005.txt`를 SQLite에 저장할 수 있다. `C:\NovelCompanyData\works\work-001\episodes\005.txt` 같은 PC별 절대 경로는 SQLite에 저장하지 않는다.
 
-현재 Task 007의 `LocalEpisodeStorage`는 `workId`와 `episodeNumber`로 동일한 로컬 파일 위치를 계산한다. 이후 SQLite 도입 시 Episode의 `storage_key`는 Storage 구현체가 파일을 찾는 논리 식별자가 된다.
+현재 번호 기반 `works/<workId>/episodes/<3자리 이상 번호>.txt` 구조를 유지한다. 읽기는 저장된 key를 사용하고 번호 변경 없는 저장은 그 key를 보존한다. 번호를 바꾸면 새 번호 경로로 이동하고 DB key도 함께 변경한다. Renderer에는 key나 절대 경로를 노출하지 않는다. 빈 원고는 0-byte TXT이며 UTF-8 본문에 metadata를 삽입하지 않는다. 공백과 전달받은 줄바꿈을 정규화하지 않는다.
 
-`content_hash`는 향후 TXT 본문 변경 감지, AI 분석 대상 변경 감지, 클라우드 동기화와 충돌 감지에 사용할 수 있다. 이번 Task에서는 hash 생성이나 비교를 구현하지 않는다.
+Task021 저장은 본문 UTF-8의 SHA-256을 content_hash에 기록한다. TXT가 원문 Source of Truth이며 hash를 통한 외부 편집 충돌 감지나 동기화는 구현하지 않았다. DB에 본문을 중복 저장하지 않는다. 실패 시 DB/TXT 복원과 잔류 backup 정책은 ARCHITECTURE의 Task021 orchestration을 따른다.
 
 ## 7. 전체 관계도
 
@@ -403,3 +405,81 @@ CanonRecord는 CanonFieldValue, CanonRecordOptionValue, CanonRecordReference로 
 - AI Agent, AI Usage 수집과 비용 계산
 - Cloud Storage, PC 간 동기화, 충돌 해결, 파일 버전 관리
 - Organization 다중 지부를 위한 다대다 확장
+
+## 11. Task017 현재 구현 — Generic CanonRecord CRUD
+
+위의 Repository/CRUD 미구현 설명은 이전 단계의 설계 이력이다. 현재 Generic CanonRecord의 작가 직접 생성/조회/수정/삭제가 구현되어 있다. Work/Episode의 기존 기능과 Legacy Canon 테이블은 보존한다.
+
+`CanonSet → CanonField → Dynamic Form → CanonRecord → Scalar / Option / Reference`
+
+| 저장소 | Task017 저장 내용 |
+| --- | --- |
+| canon_records | UUID, canon_space_id, canon_set_id, display_name, 생성/수정 UTC 시각 |
+| canon_field_values | TEXT/LONG_TEXT의 text_value, NUMBER의 number_value, BOOLEAN의 boolean_value(0/1) 중 하나 |
+| canon_record_option_values | 실제 해당 Field Option ID, 단일 또는 복수 행 |
+| canon_record_references | 실제 target Set/Record ID, 단일 또는 복수 행 |
+
+`CanonRecordInput`은 `{ displayName, fieldValues: { [fieldId]: value } }`다. 값은 string/number/boolean/null/string[] 중 하나이며 Field 정의에 따라 해석한다. optional null은 행을 만들지 않고 복수 빈 배열은 연결 행을 만들지 않는다. 이름을 별도 CanonField로 중복 저장하지 않는다. Read DTO는 없는 단일 값을 null, 없는 복수 값을 []로 복원한다.
+
+모든 Record 요청은 `{ canonSpaceId, setId }`를 함께 전달한다. Repository가 Set/Record/Field의 범위를 확인하고 복합 FK도 교차 Canon 참조를 차단한다. Update는 transaction 안에서 기존 값을 전체 교체하며 semantic validation 또는 DB 쓰기 실패 시 이름/시각/값/참조 모두 되돌린다. 다른 Record가 참조 중인 항목은 삭제할 수 없다.
+
+Migration `004_refine_initial_canon_field_requirements.sql`은 Organization.location, Character.origin_world/origin_location/current_location/attributes/passives를 required로 보정한다. Character.organization/skills/description은 optional이다. 기존 001/002/003은 변경하지 않는다. Record, Field ID, 입력값, Reference/Option 연결은 보존한다. 기존 불완전 Record를 임의로 채우지 않으며 다음 저장 때 필수 입력을 검증한다.
+
+등록 가능 여부는 required Reference target Set에 실제 Record가 1개 이상 있는지로 결정한다. REFERENCE_MANY의 required는 최소 한 개 선택을 뜻한다. 같은 target Set을 여러 Field가 참조하면 blocker를 합친다. Contract/Relationship은 별도 의미 규칙으로 서로 다른 Character 2개를 요구한다. optional Reference는 0개여도 등록 가능하다.
+
+Character Attribute >= 1, Passive >= 1, Skill >= 0, Organization nullable. Task022부터 출신 Location은 필수이고 origin_world는 선택이다. origin_world를 입력한 경우만 Location의 World와 일치해야 하며 Location 자체를 수정할 때도 이 조건을 재검증한다. current_location도 선택이고 출신 세계와 같은 세계를 강제하지 않는다. COMMON 패시브는 공유하고 UNIQUE는 단일 Character만 소유한다. Authority/Servant는 Character 생성 후 별도 Set에서 입력한다.
+
+Future Rule: Generic Rule Engine, 권속 최대 1개, 중복 활성 계약, 관계 방향/중복 정책. 이번 변경은 정의 편집이나 규칙 작성 기능까지 확장하지 않는다.
+
+### Task022 최종 필수 정책과 복구
+
+| Character Field | required |
+| --- | --- |
+| origin_world | false |
+| origin_location | true |
+| current_location | false |
+| organization | false |
+| attributes | true, 최소 1개 |
+| skills | false, 0개 허용 |
+| passives | true, 최소 1개 |
+| description | false |
+
+display_name은 별도 필수값이다. `validateCharacterRequirements`는 create/update 모두에서 세 핵심 참조의 실제 선택을 재검증한다. `validateInput`은 타입, 실제 target Record, target Set와 CanonSpace를 확인한다. `validatePassiveOwnership`은 UNIQUE 소유를 최종 검증한다. Character 저장은 기존 Generic 4개 Record/value/reference 테이블만 사용하며 legacy characters 테이블에 중복 저장하지 않는다.
+
+의존 관계는 World → Location → Character, Location → Organization, Attribute → Character, Passive → Character, Character → Authority/Servant/Contract/Relationship이다. Character readiness는 지역/속성/패시브 Record 각 1개다. 계약/관계는 서로 다른 캐릭터 2명 이상을 요구하고 자기 참조를 차단한다. relationship_type은 Task022에서 필수 TEXT로 정제했다.
+
+005는 정확한 초기 정의 구조만 대상으로 Character.origin_world/current_location을 optional, Relationship.relationship_type을 required로 바꾼다. 기존 ID/Record/값/참조는 변경하지 않는다. 기존 불완전 Record를 자동 채우지 않고 다음 저장에서 검증한다. 이번 운영 read-only 점검 당시 정의와 Record가 모두 0개여서 필수 강화로 무효화되는 기존 Record는 없었다.
+
+Task016 Single Source의 원본은 11 Set/30 Field/4 Option이다. 별도 명시적 Bootstrap은 원본 정의를 순서대로 복원한 뒤 같은 transaction에서 현재 required 정책으로 정제한다. CanonSpace ID는 유지하고 Record는 0개로 유지한다. Canon 시작에서 자동 설치하지 않으며 부분 정의는 merge하지 않는다. 운영 적용 전후 점검 결과는 0/0/0/0 → 11/30/4/0이었다.
+
+## 12. Task018 — Work metadata CRUD
+
+기존 works의 id/title/description/status/created_at/updated_at을 그대로 사용한다. Schema 변경과 신규 migration은 없다. title은 필수 문자열이며 trim 후 저장하고 중복을 허용한다. description은 optional string/null이며 Work DTO의 description은 기존처럼 string(null → 빈 문자열)이다. status는 ACTIVE/PAUSED/COMPLETED, 기본값은 ACTIVE다.
+
+Work 생성은 works 한 행만 INSERT한다. Episode, CanonSpace, CanonSet, CanonField 및 파일은 자동 생성하지 않는다. Work가 먼저 존재하고 Canon 구조는 이후 별도 설정에서 연결한다. 새 Work의 컨셉정리는 `아직 이 작품의 Canon 설정이 없습니다.`가 정상 상태다.
+
+`WorkDeletionStatus = { canDelete: boolean, episodeCount: number, hasCanonSpace: boolean }`.
+
+getWorkDeletionStatus의 SQL은 대상 works 행에 대해 episodes.work_id의 COUNT와 canon_spaces.work_id의 EXISTS를 함께 계산한다. canDelete는 episodeCount === 0 && !hasCanonSpace다. CanonSpace 내부의 CanonRecord 개수와 Episode TXT 내용은 삭제 조건에 사용하지 않는다.
+
+deleteWork는 transaction 안에서 같은 상태 계산을 다시 실행하고 조건을 만족할 때만 `DELETE FROM works WHERE id = ?`를 실행한다. 의존 데이터가 있거나 SQL이 실패하면 rollback한다. Episode/CanonSpace를 지우거나 파일을 정리하지 않고 기존 FK RESTRICT를 유지한다. 삭제 성공 DTO는 `{ id }`다.
+
+Canon 구조 편집/복사, Episode 생성 UI 및 강제 삭제/Archive 정책은 별도 Task에서 정의한다.
+
+## 13. Task019 — 빈 CanonSpace
+
+`Work → 1 : 0..1 CanonSpace → 1 : 0..N CanonSet`. CanonSpace가 있어도 Set이 0개일 수 있으며 정상적인 빈 Canon 상태다.
+
+Work와 CanonSpace의 관계는 1 : 0..1이다. `createCanonSpaceForWork(workId)`는 존재하는 Work에 UUID, work_id, template_key, 생성/수정 UTC ISO 시각을 가진 canon_spaces 한 행만 만든다. CanonSet/Field/Option/Record, Episode 및 TXT는 생성하지 않는다. 기존 ID/FK/Definition은 보존하며 신규 migration은 없다.
+
+`template_key = MODERN_FANTASY_V1`은 기존 CHECK와 호환되는 legacy metadata다. Preset 선택이 아니며 실제 Canon 구조는 canon_sets/canon_fields 데이터가 결정한다. UI에는 template 이름을 표시하지 않는다. 공간만 생성된 상태도 `hasCanonSpace = true`이므로 일반 작품 삭제를 막는다.
+
+## 14. Task020 — Canon 전체 삭제의 소유 범위
+
+CanonSpace 아래의 두 계층은 같은 작품 Canon lifecycle에 종속된다. Generic의 `canon_sets`, `canon_fields`, `canon_field_options`, `canon_records`, `canon_field_values`, `canon_record_option_values`, `canon_record_references` 7개 테이블과 Legacy의 `worlds`, `locations`, `organizations`, `characters`, `attributes`, `skills`, `passives`, `character_attributes`, `character_skills`, `character_passives`, `character_relationships`, `contracts`, `servants`, `authorities` 14개 테이블을 포함한다.
+
+Generic 값/참조는 Record와 Field를 함께 참조하고 option value는 Field Option도 참조한다. Field.reference_set_id가 다른 Set을 가리킬 수 있어 모든 Field를 지운 뒤 Set을 지운다. Legacy 연결/소유 테이블은 Character와 독립 속성/스킬/패시브를 참조하며 Character → Organization → Location → World 의존 순서가 있다. 모든 FK는 기존 RESTRICT를 유지한다.
+
+`CanonDeletionStatus`는 exists, canonSpaceId, setCount, fieldCount, optionCount, recordCount, fieldValueCount, recordOptionValueCount, referenceCount, legacyDataCount, totalDependentRowCount를 반환한다. 전체 의존 행 수에는 CanonSpace 자체를 포함하지 않는다. Work만 있으면 exists=false, canonSpaceId=null, 모든 count=0이다. 없는 Work는 WORK_NOT_FOUND이며 공간 없는 실제 삭제는 CANON_SPACE_NOT_FOUND다.
+
+`deleteCanonForWork(workId)` 성공 DTO는 `{ workId, deletedCanonSpaceId }`다. 공간 소속 행과 공간만 제거하며 Work와 Episode metadata 및 파일은 소유 삭제 범위 밖이다. 삭제 이후 `hasCanonSpace=false`; Work 삭제 가능 여부는 여전히 Episode 개수와 함께 판단한다.

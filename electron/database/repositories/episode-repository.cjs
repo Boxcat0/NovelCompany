@@ -54,7 +54,7 @@ function requireText(value, code, message) {
  * 양의 정수 회차 번호만 저장할 수 있도록 검증한다.
  */
 function requireEpisodeNumber(episodeNumber) {
-  if (!Number.isInteger(episodeNumber) || episodeNumber < 1) {
+  if (!Number.isSafeInteger(episodeNumber) || episodeNumber < 1) {
     throw new RepositoryError(
       "EPISODE_NUMBER_INVALID",
       "회차 번호는 1 이상의 정수여야 합니다.",
@@ -142,6 +142,7 @@ function createEpisode({
 
   try {
     requireExistingWork(database, validWorkId);
+    requireAvailableEpisodeNumber(validWorkId, episodeNumber);
     database
       .prepare(
         "INSERT INTO episodes (id, work_id, episode_number, title, status, storage_key, content_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -201,7 +202,7 @@ function getEpisodesByWorkId(workId) {
 }
 
 /**
- * 제목, 상태, 저장 키, 내용 해시만 부분 수정하고 없는 에피소드는 null을 반환한다.
+ * 번호와 metadata만 부분 수정하며 ID/Work를 보존하고 없는 에피소드는 null을 반환한다.
  */
 function updateEpisode(id, changes) {
   const database = getDatabase();
@@ -240,13 +241,15 @@ function updateEpisode(id, changes) {
     ? changes.contentHash
     : currentEpisode.contentHash;
   const updatedAt = new Date().toISOString();
+  const episodeNumber = Object.hasOwn(changes, "episodeNumber") ? requireEpisodeNumber(changes.episodeNumber) : currentEpisode.episodeNumber;
 
   try {
+    requireAvailableEpisodeNumber(currentEpisode.workId, episodeNumber, episodeId);
     database
       .prepare(
-        "UPDATE episodes SET title = ?, status = ?, storage_key = ?, content_hash = ?, updated_at = ? WHERE id = ?",
+        "UPDATE episodes SET title = ?, status = ?, storage_key = ?, content_hash = ?, updated_at = ?, episode_number = ? WHERE id = ?",
       )
-      .run(title, status, storageKey, contentHash, updatedAt, episodeId);
+      .run(title, status, storageKey, contentHash, updatedAt, episodeNumber, episodeId);
   } catch (error) {
     throw toEpisodeWriteError(error);
   }
@@ -254,7 +257,46 @@ function updateEpisode(id, changes) {
   return getEpisodeById(episodeId);
 }
 
+/** 저장 직전 같은 작품의 중복 번호를 확인하며 DB UNIQUE도 최종 방어선으로 유지한다. */
+function requireAvailableEpisodeNumber(workId, number, excludingId = "") {
+  requireEpisodeNumber(number);
+  if (getDatabase().prepare("SELECT 1 FROM episodes WHERE work_id = ? AND episode_number = ? AND id <> ?").get(workId, number, excludingId)) {
+    throw new RepositoryError("EPISODE_NUMBER_DUPLICATE", "이미 같은 회차 번호의 에피소드가 존재합니다.");
+  }
+}
+
+/** 작품 내 정렬된 번호를 훑어 사용하지 않는 가장 작은 양의 정수를 추천한다. */
+function findNextAvailableEpisodeNumber(workId) {
+  const database = getDatabase();
+  requireExistingWork(database, requireId(workId, "작품 ID"));
+  let next = 1;
+  for (const row of database.prepare("SELECT episode_number FROM episodes WHERE work_id = ? ORDER BY episode_number").all(workId)) {
+    if (row.episode_number > next) break;
+    if (row.episode_number === next) next++;
+  }
+  return next;
+}
+
+/** 실제 작품 소속을 재확인해 다른 Work의 Episode를 수정/삭제하지 못하게 한다. */
+function getEpisodeForWork(workId, episodeId) {
+  requireExistingWork(getDatabase(), requireId(workId, "작품 ID"));
+  const episode = getEpisodeById(episodeId);
+  if (!episode || episode.workId !== workId) throw new RepositoryError("EPISODE_NOT_FOUND", "에피소드를 찾을 수 없습니다.");
+  return episode;
+}
+
+/** 소속을 검증한 Episode metadata 한 행만 삭제하며 파일 작업은 orchestration에 맡긴다. */
+function deleteEpisode(workId, episodeId) {
+  getEpisodeForWork(workId, episodeId);
+  getDatabase().prepare("DELETE FROM episodes WHERE id = ? AND work_id = ?").run(episodeId, workId);
+  return { id: episodeId, workId };
+}
+
 module.exports = {
+  requireAvailableEpisodeNumber,
+  findNextAvailableEpisodeNumber,
+  getEpisodeForWork,
+  deleteEpisode,
   createEpisode,
   getEpisodeById,
   getEpisodesByWorkId,

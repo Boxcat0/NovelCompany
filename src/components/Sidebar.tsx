@@ -1,13 +1,15 @@
 export type NavigationItem =
   | "company"
   | "works"
+  | "workManagement"
   | "concept"
   | "employees"
   | "settings";
 
 const navigationItems: Array<{ id: NavigationItem; label: string }> = [
   { id: "company", label: "회사" },
-  { id: "works", label: "작품" },
+  { id: "workManagement", label: "작품 관리" },
+  { id: "works", label: "작품/회차" },
   { id: "concept", label: "컨셉정리" },
   { id: "employees", label: "직원" },
   { id: "settings", label: "설정" },
@@ -18,6 +20,7 @@ type SidebarProps = {
   onSelect: (item: NavigationItem) => void;
 };
 
+/** 작품 관리와 회차 Viewer 등 각 화면의 진입점을 표시하고 선택을 App에 전달한다. */
 function Sidebar({ activeItem, onSelect }: SidebarProps) {
   return (
     <nav className="sidebar" aria-label="주 메뉴">

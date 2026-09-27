@@ -163,12 +163,12 @@ async function runValidation() {
       workId: work.id,
       episodeNumber: 1,
       title: "첫 번째 IPC 회차",
-      storageKey: "ipc/episodes/001.txt",
+      content: "첫 문장입니다.\n\n두 번째 문장입니다.",
     });
     assert.equal(firstEpisodeResult.ok, true);
     const episode = firstEpisodeResult.data;
     const expectedContent = "첫 문장입니다.\n\n두 번째 문장입니다.";
-    await episodeStorage.saveEpisode("ipc", 1, expectedContent);
+    assert.equal("storageKey" in episode, false);
 
     const getEpisodeById = ipcMain.handlers.get(IPC_CHANNELS.EPISODE_GET_BY_ID);
     assert.equal((await getEpisodeById(null, episode.id)).data.id, episode.id);
@@ -195,8 +195,11 @@ async function runValidation() {
     assert.equal(
       (
         await updateEpisode(null, episode.id, {
+          workId: work.id,
+          episodeNumber: 1,
+          title: episode.title,
           status: "COMPLETED",
-          contentHash: "ipc-hash",
+          content: expectedContent,
         })
       ).data.status,
       "COMPLETED",
@@ -207,7 +210,7 @@ async function runValidation() {
         workId: work.id,
         episodeNumber: 1,
         title: "중복 IPC 회차",
-        storageKey: "ipc/episodes/002.txt",
+        content: "",
       }),
       "EPISODE_NUMBER_DUPLICATE",
       "이미 같은 회차 번호의 에피소드가 존재합니다.",
@@ -217,7 +220,7 @@ async function runValidation() {
         workId: "missing-work",
         episodeNumber: 2,
         title: "없는 작품 회차",
-        storageKey: "ipc/episodes/003.txt",
+        content: "",
       }),
       "WORK_NOT_FOUND",
       "작품을 찾을 수 없습니다.",
@@ -227,8 +230,9 @@ async function runValidation() {
       workId: work.id,
       episodeNumber: 2,
       title: "원고 없는 회차",
-      storageKey: "ipc/episodes/002.txt",
+      content: "",
     });
+    fs.unlinkSync(path.join(temporaryRoot, "works", work.id, "episodes", "002.txt"));
     expectFailure(
       await readEpisodeContent(null, missingContentEpisodeResult.data.id),
       "EPISODE_CONTENT_NOT_FOUND",
@@ -294,6 +298,8 @@ async function runValidation() {
       "getById",
       "create",
       "update",
+      "getDeletionStatus",
+      "delete",
     ]);
     assert.deepEqual(Object.keys(runtimePreloadApi.episodes), [
       "getById",
@@ -301,9 +307,14 @@ async function runValidation() {
       "create",
       "update",
       "readContent",
+      "delete",
+      "getNextAvailableNumber",
     ]);
     assert.deepEqual(Object.keys(runtimePreloadApi.canon.spaces), [
       "getByWorkId",
+      "createForWork",
+      "getDeletionStatus",
+      "deleteForWork",
     ]);
     assert.deepEqual(Object.keys(runtimePreloadApi.canon.sets), [
       "getByCanonSpaceId",
@@ -344,12 +355,127 @@ async function runValidation() {
       ],
     );
 
+    await validateCanonRecordIpc(ipcMain, runtimePreloadApi);
+    await validateWorkManagementIpc(ipcMain, runtimePreloadApi);
+    await require("../database/canon-space-validation.cjs").validateCanonSpaceIpc(ipcMain, runtimePreloadApi);
+    await require("../database/canon-deletion-validation.cjs").validateCanonDeletionIpc(ipcMain, runtimePreloadApi);
+    await require("../database/episode-editing-validation.cjs").validateEpisodeEditingIpc(ipcMain, runtimePreloadApi, episodeStorage);
+    await require("../database/canon-authoring-validation.cjs").validateCanonAuthoringIpc(ipcMain);
     console.log("IPC validation passed.");
   } finally {
     closeDatabase();
     fs.rmSync(temporaryRoot, { recursive: true, force: true });
     delete process.env.NOVEL_COMPANY_DATA_DIR;
   }
+}
+
+/** 일곱 Record API의 handler 결과, bridge 인자, 한국어 오류와 타입 선언을 검증한다. */
+async function validateCanonRecordIpc(ipcMain, runtimeApi) {
+  const { createCanonFixture, inputFor } = require("../database/canon-record-validation.cjs");
+  const scope = createCanonFixture();
+  const api = createNovelCompanyApi({
+    /** 테스트 bridge를 실제 등록 handler에 연결한다. */
+    invoke(channel, ...args) { return ipcMain.handlers.get(channel)(null, ...args); },
+  });
+  const worldInput = inputFor(scope.world, "IPC 검증 세계");
+  const created = await api.canon.records.create(scope.world, worldInput);
+  assert.equal(created.ok, true);
+  const id = created.data.id;
+  assert.equal((await api.canon.records.getBySetId(scope.world)).data.length, 1);
+  assert.equal((await api.canon.records.getById(scope.world, id)).data.id, id);
+  assert.equal((await api.canon.records.getCreateReadiness(scope.location)).data.canCreate, true);
+  const fieldId = getDatabase().prepare("SELECT id FROM canon_fields WHERE canon_set_id = ? AND key = 'world'").get(scope.location.setId).id;
+  assert.equal((await api.canon.records.getReferenceOptions(scope.location, fieldId)).data[0].id, id);
+  assert.equal((await api.canon.records.update(scope.world, id, { ...worldInput, displayName: "수정" })).data.displayName, "수정");
+  const cases = [
+    ["getBySetId", IPC_CHANNELS.CANON_RECORD_GET_BY_SET_ID, [scope.world]],
+    ["getById", IPC_CHANNELS.CANON_RECORD_GET_BY_ID, [scope.world, id]],
+    ["getCreateReadiness", IPC_CHANNELS.CANON_RECORD_GET_CREATE_READINESS, [scope.world]],
+    ["getReferenceOptions", IPC_CHANNELS.CANON_RECORD_GET_REFERENCE_OPTIONS, [scope.location, fieldId, null]],
+    ["create", IPC_CHANNELS.CANON_RECORD_CREATE, [scope.world, worldInput]],
+    ["update", IPC_CHANNELS.CANON_RECORD_UPDATE, [scope.world, id, worldInput]],
+    ["delete", IPC_CHANNELS.CANON_RECORD_DELETE, [scope.world, id]],
+  ];
+  const types = fs.readFileSync(path.join(__dirname, "../../src/types/electron-api.d.ts"), "utf8");
+  for (const [method, channel, args] of cases) {
+    const runtimeResult = await runtimeApi.canon.records[method](...args);
+    assert.equal(runtimeResult.data.channel, channel);
+    assert.equal(JSON.stringify(runtimeResult.data.args), JSON.stringify(args));
+    const fakeApi = createNovelCompanyApi({
+      /** 보조 bridge의 channel과 전체 scope 인자가 보존되는지 확인한다. */
+      invoke(actualChannel, ...actualArgs) { assert.equal(actualChannel, channel); assert.deepEqual(actualArgs, args); return Promise.resolve(); },
+    });
+    await fakeApi.canon.records[method](...args);
+    const invalid = await api.canon.records[method](null, ...args.slice(1));
+    assert.equal(invalid.ok, false);
+    assert.match(invalid.error.message, /[가-힣]/);
+    assert.deepEqual(Object.keys(invalid.error), ["code", "message"]);
+    assert.ok(types.includes(method + "(scope: CanonScope"), method);
+  }
+  assert.equal((await api.canon.records.delete(scope.world, id)).data.id, id);
+  expectFailure(await api.canon.records.getById(scope.world, id), "CANON_RECORD_NOT_FOUND", "해당 설정 항목을 찾을 수 없습니다.");
+  expectFailure(await api.canon.records.create(scope.world, { displayName: "", fieldValues: {} }), "CANON_REQUIRED_FIELD_MISSING", "이름을 입력해 주세요.");
+}
+
+/** Work 6개 API의 handler, 두 preload 계약, 한국어 실패 및 내부 오류 은닉을 검사한다. */
+async function validateWorkManagementIpc(ipcMain, runtimeApi) {
+  const api = createNovelCompanyApi({
+    /** 검증용 API를 실제 등록 handler로 연결한다. */
+    invoke(channel, ...args) { return ipcMain.handlers.get(channel)(null, ...args); },
+  });
+  const input = { title: "테스트 IPC 작품", description: "설명", status: "ACTIVE" };
+  const created = await api.works.create(input);
+  assert.equal(created.ok, true);
+  const id = created.data.id;
+  assert.ok((await api.works.getAll()).data.some((work) => work.id === id));
+  assert.deepEqual((await api.works.getById(id)).data, created.data);
+  assert.equal((await api.works.update(id, { title: "수정", status: "PAUSED" })).data.status, "PAUSED");
+  assert.deepEqual(await api.works.getDeletionStatus(id), { ok: true, data: { canDelete: true, episodeCount: 0, hasCanonSpace: false } });
+  assert.deepEqual(await api.works.delete(id), { ok: true, data: { id } });
+  assert.deepEqual(await api.works.getById(id), { ok: true, data: null });
+  for (const result of [await api.works.getDeletionStatus(id), await api.works.delete(id), await api.works.update(id, input)]) expectFailure(result, "WORK_NOT_FOUND", "작품을 찾을 수 없습니다.");
+  expectFailure(await api.works.create({ title: " " }), "WORK_TITLE_REQUIRED", "작품 제목을 입력해 주세요.");
+  expectFailure(await api.works.create({ ...input, status: "INVALID" }), "WORK_STATUS_INVALID", "작품 상태가 올바르지 않습니다.");
+  const types = fs.readFileSync(path.join(__dirname, "../../src/types/electron-api.d.ts"), "utf8");
+  for (const [method, channel, args] of [
+    ["getAll", IPC_CHANNELS.WORK_GET_ALL, []],
+    ["getById", IPC_CHANNELS.WORK_GET_BY_ID, [id]],
+    ["create", IPC_CHANNELS.WORK_CREATE, [input]],
+    ["update", IPC_CHANNELS.WORK_UPDATE, [id, input]],
+    ["getDeletionStatus", IPC_CHANNELS.WORK_GET_DELETION_STATUS, [id]],
+    ["delete", IPC_CHANNELS.WORK_DELETE, [id]],
+  ]) {
+    const result = await runtimeApi.works[method](...args);
+    assert.equal(result.data.channel, channel);
+    assert.equal(JSON.stringify(result.data.args), JSON.stringify(args));
+    const bridge = createNovelCompanyApi({
+      /** 보조 preload도 동일한 channel과 인자를 전달하는지 검사한다. */
+      invoke(actualChannel, ...actualArgs) { assert.equal(actualChannel, channel); assert.deepEqual(actualArgs, args); return Promise.resolve(); },
+    });
+    await bridge.works[method](...args);
+    assert.ok(types.includes(method + "("));
+  }
+  const { addEmptyCanonSpace } = require("../database/work-management-validation.cjs");
+  for (const [episode, canon, code, message] of [
+    [true, false, "WORK_DELETE_BLOCKED_BY_EPISODES", "이 작품에는 연결된 회차가 있어 삭제할 수 없습니다."],
+    [false, true, "WORK_DELETE_BLOCKED_BY_CANON", "이 작품에는 Canon 데이터가 있어 삭제할 수 없습니다."],
+    [true, true, "WORK_DELETE_BLOCKED_BY_DEPENDENCIES", "이 작품에는 연결된 회차와 Canon 데이터가 있어 삭제할 수 없습니다."],
+  ]) {
+    const work = (await api.works.create(input)).data;
+    if (episode) await api.episodes.create({ workId: work.id, episodeNumber: 1, title: "테스트 회차", content: "" });
+    if (canon) addEmptyCanonSpace(work.id);
+    assert.equal((await api.works.getDeletionStatus(work.id)).data.canDelete, false);
+    expectFailure(await api.works.delete(work.id), code, message);
+    assert.equal((await api.works.getById(work.id)).data.id, work.id);
+  }
+  const failureWork = (await api.works.create(input)).data;
+  getDatabase().exec("CREATE TEMP TRIGGER task018_ipc_delete_failure AFTER DELETE ON works BEGIN SELECT RAISE(FAIL, 'raw SQL must stay in Main'); END");
+  try {
+    const result = await api.works.delete(failureWork.id);
+    expectFailure(result, "WORK_DELETE_FAILED", "작품을 삭제하지 못했습니다.");
+    assert.deepEqual(Object.keys(result.error), ["code", "message"]);
+    assert.equal((await api.works.getById(failureWork.id)).data.id, failureWork.id);
+  } finally { getDatabase().exec("DROP TRIGGER task018_ipc_delete_failure"); }
 }
 
 runValidation().catch((error) => {

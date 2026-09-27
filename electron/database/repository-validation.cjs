@@ -24,9 +24,9 @@ function expectRepositoryError(action, message) {
 }
 
 /**
- * Work와 Episode Repository를 production DB와 분리된 임시 DB에서 검증한다.
+ * Work/Episode와 Canon 작성 Repository를 임시 DB에서 검증하고 비동기 공통 시나리오까지 기다린다.
  */
-function runValidation() {
+async function runValidation() {
   const temporaryRoot = fs.mkdtempSync(
     path.join(os.tmpdir(), "novel-company-repository-"),
   );
@@ -168,6 +168,12 @@ function runValidation() {
       "원고 저장 경로를 입력해 주세요.",
     );
 
+    require("./canon-record-validation.cjs").validateCanonRecords();
+    await require("./canon-authoring-validation.cjs").validateCanonAuthoring();
+    require("./work-management-validation.cjs").validateWorkManagement(temporaryRoot);
+    require("./canon-space-validation.cjs").validateCanonSpaces();
+    require("./canon-deletion-validation.cjs").validateCanonDeletion(temporaryRoot);
+    require("./episode-editing-validation.cjs").validateEpisodeEditing(temporaryRoot);
     console.log("Repository validation passed.");
   } finally {
     closeDatabase();
@@ -175,5 +181,5 @@ function runValidation() {
   }
 }
 
-runValidation();
+runValidation().catch((error) => { console.error(error); process.exitCode = 1; });
 

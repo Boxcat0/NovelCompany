@@ -54,7 +54,7 @@ function getEpisodeFilePathByStorageKey(dataRoot, storageKey) {
   }
 
   const segments = storageKey.split("/");
-  if (segments.some((segment) => !segment || segment === "." || segment === "..")) {
+  if (segments.some((segment) => !segment || segment === "." || segment === ".." || /[<>:"|?*\x00-\x1f]/.test(segment) || /[. ]$/.test(segment))) {
     throw new Error("Episode storage key contains an invalid path segment.");
   }
 

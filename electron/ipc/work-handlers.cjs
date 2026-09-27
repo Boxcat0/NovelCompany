@@ -3,6 +3,8 @@ const {
   getAllWorks,
   getWorkById,
   updateWork,
+  getWorkDeletionStatus,
+  deleteWork,
 } = require("../database/repositories/work-repository.cjs");
 const { RepositoryError } = require("../database/repositories/repository-error.cjs");
 const { executeIpcAction } = require("./ipc-action.cjs");
@@ -11,7 +13,7 @@ const { IPC_CHANNELS } = require("./ipc-channels.cjs");
 const registeredIpcMains = new WeakSet();
 
 /**
- * Work Repository 요청을 처리할 IPC Handler를 한 번만 등록한다.
+ * 작품 CRUD와 안전 삭제 상태 요청을 기존 Result 형식으로 처리하도록 한 번만 등록한다.
  */
 function registerWorkHandlers(ipcMain) {
   if (registeredIpcMains.has(ipcMain)) {
@@ -35,6 +37,13 @@ function registerWorkHandlers(ipcMain) {
       }
       return work;
     }),
+  );
+
+  ipcMain.handle(IPC_CHANNELS.WORK_GET_DELETION_STATUS, (_event, id) =>
+    executeIpcAction(IPC_CHANNELS.WORK_GET_DELETION_STATUS, () => getWorkDeletionStatus(id)),
+  );
+  ipcMain.handle(IPC_CHANNELS.WORK_DELETE, (_event, id) =>
+    executeIpcAction(IPC_CHANNELS.WORK_DELETE, () => deleteWork(id)),
   );
 
   registeredIpcMains.add(ipcMain);

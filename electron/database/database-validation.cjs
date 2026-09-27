@@ -58,7 +58,7 @@ async function runValidation() {
       assert.equal(tableNames.has(tableName), true, "Missing table: " + tableName);
     }
     assert.equal(database.prepare("PRAGMA foreign_keys").get().foreign_keys, 1);
-    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 3);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 5);
 
     insertWorkAndEpisode(database, "work-a");
     insertWorkAndEpisode(database, "work-b");
@@ -167,6 +167,12 @@ async function runValidation() {
     expectFailure(() => execute(database, "DELETE FROM works WHERE id = ?", "work-a"), "Work deletion is restricted.");
     assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
 
+    require("./canon-record-validation.cjs").validateCanonRecords();
+    await require("./canon-authoring-validation.cjs").validateCanonAuthoring();
+    require("./work-management-validation.cjs").validateWorkManagement(temporaryRoot);
+    require("./canon-space-validation.cjs").validateCanonSpaces();
+    require("./canon-deletion-validation.cjs").validateCanonDeletion(temporaryRoot);
+    require("./episode-editing-validation.cjs").validateEpisodeEditing(temporaryRoot);
     const storage = new LocalEpisodeStorage(temporaryRoot);
     await storage.saveEpisode("work-a", 1, "TXT source of truth");
     assert.equal(await storage.readEpisode("work-a", 1), "TXT source of truth");
@@ -180,12 +186,51 @@ async function runValidation() {
     assert.equal(legacyDatabase.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = 2").get().count, 0);
     assert.equal(legacyDatabase.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'canon_spaces'").get().count, 0);
     assert.deepEqual(legacyDatabase.prepare("PRAGMA foreign_key_check").all(), []);
+    validateTask017Migration(temporaryRoot);
+    require("./canon-authoring-validation.cjs").validateAuthoringMigration(temporaryRoot);
+    require("./canon-bootstrap-validation.cjs").validateCanonBootstrap(temporaryRoot);
     console.log("Database validation passed.");
   } finally {
     closeDatabase();
     legacyDatabase?.close();
     fs.rmSync(temporaryRoot, { recursive: true, force: true });
   }
+}
+
+/** 실제 003 파일에 004를 적용해 백업 선행, ID/데이터 보존 및 재시작 안전성을 확인한다. */
+function validateTask017Migration(temporaryRoot) {
+  const { createCanonFixture, inputFor } = require("./canon-record-validation.cjs");
+  const records = require("./repositories/canon-record-repository.cjs");
+  const databasePath = path.join(temporaryRoot, "migration-task017.db");
+  const connection = initializeDatabase(databasePath);
+  const scopes = createCanonFixture();
+  const saved = records.create(scopes.world, inputFor(scopes.world, "보존 검증", { description: "기존 입력 보존" }));
+  connection.exec("UPDATE canon_fields SET required = 0 WHERE key IN ('origin_world', 'origin_location', 'current_location', 'attributes', 'passives', 'location')");
+  connection.exec("DELETE FROM schema_migrations WHERE version >= 4");
+  const beforeFields = connection.prepare("SELECT id, canon_set_id, key, value_type FROM canon_fields ORDER BY id").all();
+  closeDatabase();
+  const migrated = initializeDatabase(databasePath);
+  assert.deepEqual(migrated.prepare("SELECT id, canon_set_id, key, value_type FROM canon_fields ORDER BY id").all(), beforeFields);
+  assert.deepEqual(records.getById(scopes.world, saved.id), saved);
+  assert.equal(migrated.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 5);
+  const { CANON_SETS } = require("./setup/setup-initial-novel-canon.cjs");
+  for (const set of CANON_SETS) {
+    for (const field of set.fields) assert.equal(migrated.prepare("SELECT required FROM canon_fields WHERE canon_set_id = ? AND key = ?").get(scopes[set.key].setId, field[0]).required, Number(field[4]));
+  }
+  const backupDirectory = path.join(temporaryRoot, "backups");
+  const backups = fs.readdirSync(backupDirectory).filter((file) => file.startsWith("before-task017-"));
+  assert.equal(backups.length, 1);
+  const backup = new DatabaseSync(path.join(backupDirectory, backups[0]), { readOnly: true });
+  try {
+    assert.equal(backup.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 3);
+    assert.equal(backup.prepare("SELECT required FROM canon_fields WHERE canon_set_id = ? AND key = 'attributes'").get(scopes.character.setId).required, 0);
+    assert.equal(backup.prepare("SELECT display_name FROM canon_records WHERE id = ?").get(saved.id).display_name, saved.displayName);
+  } finally { backup.close(); }
+  closeDatabase();
+  initializeDatabase(databasePath);
+  assert.equal(fs.readdirSync(backupDirectory).length, 1);
+  closeDatabase();
+  console.log("Task017 migration backup, preservation and restart validation passed.");
 }
 
 runValidation().catch((error) => {

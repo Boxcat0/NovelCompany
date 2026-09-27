@@ -7,6 +7,7 @@ const { runMigrations } = require("./migrate.cjs");
 const migrationsDirectory = path.join(__dirname, "migrations");
 let database;
 
+/** 연결을 열고 기존 DB의 Definition refinement(004/005) 전에 SQLite 백업을 보관한다. */
 function initializeDatabase(databasePath = getDatabaseFilePath()) {
   if (database) {
     return database;
@@ -17,6 +18,15 @@ function initializeDatabase(databasePath = getDatabaseFilePath()) {
 
   try {
     connection.exec("PRAGMA foreign_keys = ON");
+    const hasMigrations = connection.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'").get();
+    const needsTask017 = hasMigrations && connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 3").get() && !connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 4").get();
+    const needsTask022 = hasMigrations && connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 3").get() && !connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 5").get();
+    if (needsTask017 || needsTask022) {
+      const backupDirectory = path.join(path.dirname(databasePath), "backups");
+      fs.mkdirSync(backupDirectory, { recursive: true });
+      const backupPath = path.join(backupDirectory, (needsTask017 ? "before-task017-" : "before-task022-") + require("node:crypto").randomUUID() + ".db");
+      connection.exec("VACUUM INTO '" + backupPath.replace(/'/g, "''") + "'");
+    }
     runMigrations(connection, migrationsDirectory);
     database = connection;
     return database;

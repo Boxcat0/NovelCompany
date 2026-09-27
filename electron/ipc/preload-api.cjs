@@ -11,8 +11,16 @@ function createNovelCompanyApi(ipcRenderer) {
       create: (input) => ipcRenderer.invoke(IPC_CHANNELS.WORK_CREATE, input),
       update: (id, changes) =>
         ipcRenderer.invoke(IPC_CHANNELS.WORK_UPDATE, id, changes),
+      /** 작품 삭제 가능 상태 조회 인자를 Main으로 전달한다. */
+      getDeletionStatus: (id) => ipcRenderer.invoke(IPC_CHANNELS.WORK_GET_DELETION_STATUS, id),
+      /** 최종 의존성 검사를 포함하는 작품 삭제를 요청한다. */
+      delete: (id) => ipcRenderer.invoke(IPC_CHANNELS.WORK_DELETE, id),
     },
     episodes: {
+      /** 회차와 TXT를 함께 삭제할 작품 범위를 전달한다. */
+      delete: (id, workId) => ipcRenderer.invoke(IPC_CHANNELS.EPISODE_DELETE, id, workId),
+      /** DB의 현재 빈 번호를 추천받는다. */
+      getNextAvailableNumber: (workId) => ipcRenderer.invoke(IPC_CHANNELS.EPISODE_GET_NEXT_NUMBER, workId),
       getById: (id) =>
         ipcRenderer.invoke(IPC_CHANNELS.EPISODE_GET_BY_ID, id),
       getByWorkId: (workId) =>
@@ -25,7 +33,29 @@ function createNovelCompanyApi(ipcRenderer) {
         ipcRenderer.invoke(IPC_CHANNELS.EPISODE_READ_CONTENT, episodeId),
     },
     canon: {
+      records: {
+        /** 검증용 bridge에서 목록 조회 인자를 전달한다. */
+        getBySetId: (scope) => ipcRenderer.invoke(IPC_CHANNELS.CANON_RECORD_GET_BY_SET_ID, scope),
+        /** 검증용 bridge에서 상세 조회 인자를 전달한다. */
+        getById: (scope, id) => ipcRenderer.invoke(IPC_CHANNELS.CANON_RECORD_GET_BY_ID, scope, id),
+        /** 검증용 bridge에서 선행조건 조회 인자를 전달한다. */
+        getCreateReadiness: (scope) => ipcRenderer.invoke(IPC_CHANNELS.CANON_RECORD_GET_CREATE_READINESS, scope),
+        /** 검증용 bridge에서 참조 선택지 조회 인자를 전달한다. */
+        getReferenceOptions: (scope, fieldId, id) => ipcRenderer.invoke(IPC_CHANNELS.CANON_RECORD_GET_REFERENCE_OPTIONS, scope, fieldId, id),
+        /** 검증용 bridge에서 생성 입력을 전달한다. */
+        create: (scope, input) => ipcRenderer.invoke(IPC_CHANNELS.CANON_RECORD_CREATE, scope, input),
+        /** 검증용 bridge에서 수정 입력을 전달한다. */
+        update: (scope, id, input) => ipcRenderer.invoke(IPC_CHANNELS.CANON_RECORD_UPDATE, scope, id, input),
+        /** 검증용 bridge에서 삭제 범위를 전달한다. */
+        delete: (scope, id) => ipcRenderer.invoke(IPC_CHANNELS.CANON_RECORD_DELETE, scope, id),
+      },
       spaces: {
+        /** 선택 작품의 최신 Canon 삭제 영향을 조회한다. */
+        getDeletionStatus: (workId) => ipcRenderer.invoke(IPC_CHANNELS.CANON_SPACE_GET_DELETION_STATUS, workId),
+        /** 명시적으로 확인한 작품의 Canon 전체 삭제를 Main에 요청한다. */
+        deleteForWork: (workId) => ipcRenderer.invoke(IPC_CHANNELS.CANON_SPACE_DELETE_FOR_WORK, workId),
+        /** 선택 작품의 빈 CanonSpace 생성을 Main에 요청한다. */
+        createForWork: (workId) => ipcRenderer.invoke(IPC_CHANNELS.CANON_SPACE_CREATE_FOR_WORK, workId),
         getByWorkId: (workId) =>
           ipcRenderer.invoke(IPC_CHANNELS.CANON_SPACE_GET_BY_WORK_ID, workId),
       },
