@@ -12,6 +12,8 @@
     "test:database": "node electron/database/database-validation.cjs",
     "test:repository": "node electron/database/repository-validation.cjs",
     "test:ipc": "node electron/ipc/ipc-validation.cjs",
+    "test:context": "node electron/context/context-validation.cjs",
+    "test:review": "node electron/review/review-validation.cjs",
     "test:work-ui": "node electron/work-management-ui-validation.cjs",
     "setup:initial-canon": "node electron/database/setup/setup-initial-novel-canon.cjs",
     "build": "npm run typecheck && vite build",

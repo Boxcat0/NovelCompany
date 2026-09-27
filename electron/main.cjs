@@ -3,6 +3,8 @@ const path = require("node:path");
 const { closeDatabase, initializeDatabase } = require("./database/database.cjs");
 const { registerEpisodeHandlers } = require("./ipc/episode-handlers.cjs");
 const { registerCanonHandlers } = require("./ipc/canon-handlers.cjs");
+const { registerContextHandlers } = require("./ipc/context-handlers.cjs");
+const { registerReviewHandlers } = require("./ipc/review-handlers.cjs");
 const { registerWorkHandlers } = require("./ipc/work-handlers.cjs");
 const { LocalEpisodeStorage } = require("./storage/local-episode-storage.cjs");
 
@@ -66,6 +68,8 @@ async function startApplication() {
     registerWorkHandlers(ipcMain);
     registerCanonHandlers(ipcMain);
     registerEpisodeHandlers(ipcMain, episodeStorage);
+    registerContextHandlers(ipcMain, episodeStorage);
+    registerReviewHandlers(ipcMain, episodeStorage);
   } catch (error) {
     console.error("Failed to initialize local data.", error);
     app.quit();

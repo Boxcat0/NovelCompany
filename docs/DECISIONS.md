@@ -204,6 +204,24 @@ Task021은 Episode CRUD + TXT Editing이다. CanonSet/CanonField CRUD는 시스�
 
 누락 TXT는 복구 가능한 상태로 안내하고 빈 원고 저장도 허용한다. 일반 읽기 실패에서는 저장을 차단한다. 입력 폐기 확인, 중복 쓰기 방지, 최신 읽기 응답만 적용하는 보호를 유지한다. 자동 저장/AI/리치 에디터/Canon 구조 편집과 복사는 이번 범위에 없다. 테스트는 임시 DB/데이터 루트와 실제 sandbox Electron에서 수행한다.
 
+## Decision 027 — ReviewRun은 immutable history이며 Stub은 판정 결과가 아니다
+
+**상태:** 채택됨 — Task024 구현
+
+검토 재실행은 기존 Run을 갱신하지 않고 새 Run을 생성한다. Review source identity는 검증된 Episode TXT hash와 canonical JSON으로 직렬화한 FULL_CANON hash로만 보존한다. 원본 TXT·Canon·WorkContext 전체는 persistence하지 않으며 Review 결과의 자동 적용도 하지 않는다.
+
+`STUB_V1`은 Review processor contract와 lifecycle 연결을 검증하기 위한 빈 findings processor다. UI는 실제 AI 검토나 “문제 없음”으로 표현하지 않으며, Stub임을 명확히 표시한다. processor 또는 결과 저장 실패는 RUNNING Run을 FAILED로 남기고 raw cause는 Main log에만 기록한다.
+
+## Decision 026 — WorkContext는 저장하지 않는 읽기 전용 공통 입력이다
+
+**상태:** 채택됨 · Task023 구현
+
+저장된 Episode TXT와 Generic Canon은 각각의 Source of Truth를 유지한다. Main-side buildEpisodeWorkContext가 둘을 FULL_CANON WorkContext로 조합하지만, 이를 DB/파일에 persistence하거나 원본을 보정하지 않는다. content_hash가 존재할 때 TXT hash가 다르면 build를 중단한다.
+
+Reference와 Option은 내부 UUID만 전달하지 않고 사람이 이해할 수 있는 recordId/setKey/displayName 및 key/label로 해석한다. 손상된 reference/option은 silent fallback 없이 오류로 처리한다. Renderer는 단일 context IPC만 호출하며 path/storageKey/Node/SQLite를 받지 않는다.
+
+Task023은 Review, Canon 충돌 판정, 문장 수정, Prompt, AI Provider 호출을 구현하지 않는다. 저장되지 않은 editor draft는 Context에 포함하지 않는다.
+
 ## Decision 025 — 기존 정의로 Canon 작성 단계를 안내하고 현재 작품 복구는 별도로 실행한다
 
 **상태:** 채택됨 · Task022 구현

@@ -25,6 +25,8 @@ const { createWork } = require("./database/repositories/work-repository.cjs");
 const { addEmptyCanonSpace } = require("./database/work-management-validation.cjs");
 const { registerWorkHandlers } = require("./ipc/work-handlers.cjs");
 const { registerCanonHandlers } = require("./ipc/canon-handlers.cjs");
+const { registerContextHandlers } = require("./ipc/context-handlers.cjs");
+const { registerReviewHandlers } = require("./ipc/review-handlers.cjs");
 const { registerEpisodeHandlers } = require("./ipc/episode-handlers.cjs");
 const { LocalEpisodeStorage } = require("./storage/local-episode-storage.cjs");
 
@@ -162,6 +164,8 @@ async function runValidation() {
     registerCanonHandlers(ipcMain);
     const episodeStorage = new LocalEpisodeStorage(temporaryRoot);
     registerEpisodeHandlers(ipcMain, episodeStorage);
+    registerContextHandlers(ipcMain, episodeStorage);
+    registerReviewHandlers(ipcMain, episodeStorage);
     const { exerciseEpisodes } = require("./episode-ui-validation.cjs");
     const { exerciseCanonAuthoring } = require("./canon-authoring-ui-validation.cjs");
     window = new BrowserWindow({ show: false, width: 1280, height: 900, webPreferences: { preload: path.join(__dirname, "preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false, offscreen: true } });

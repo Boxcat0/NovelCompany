@@ -11,8 +11,10 @@ async function exerciseCanonStart(reopened = false) {
   }
   /** 표시 문구가 일치하는 실제 버튼을 찾는다. */
   function button(text) { return [...document.querySelectorAll("button")].find((item) => item.textContent.trim() === text); }
+  /** fieldset 상속 비활성까지 포함한 실제 조작 가능 상태를 판별한다. */
+  function isAvailable(item) { return Boolean(item && !item.matches(":disabled")); }
   /** 활성 버튼의 사용자 클릭을 실행한다. */
-  function click(text) { const target = button(text); if (!target || target.disabled) throw new Error("Unavailable: " + text); target.click(); }
+  function click(text) { const target = button(text); if (!isAvailable(target)) throw new Error("Unavailable: " + text); target.click(); }
   /** 검증 실패에 의미 있는 문맥을 남긴다. */
   function check(value, label) { if (!value) throw new Error(label); }
   /** React 입력 추적을 통해 실제 폼 값을 바꾼다. */
@@ -20,18 +22,19 @@ async function exerciseCanonStart(reopened = false) {
     const input = document.getElementById(id);
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, value);
     input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
   }
   /** 컨셉정리에서 작품 목록을 읽고 지정 작품을 선택한다. */
   async function selectConcept(title) {
     click("컨셉정리");
-    await waitFor(() => button(title) && !button(title).disabled, "work list");
+    await waitFor(() => isAvailable(button(title)), "work list");
     click(title);
     await waitFor(() => document.querySelector(".back-button") && !document.querySelector(".back-button").disabled, "space loaded");
   }
   /** 실제 작품 관리에서 선택한 작품의 삭제 가능 여부를 확인한다. */
   async function checkDeletion(blocked) {
     click("작품 관리");
-    await waitFor(() => button("+ 새 작품") && !button("+ 새 작품").disabled, "management loaded");
+    await waitFor(() => isAvailable(button("+ 새 작품")), "management loaded");
     [...document.querySelectorAll(".work-card-button")].find((item) => item.textContent.includes("Canon 시작 UI 작품")).click();
     await waitFor(() => document.getElementById("work-title")?.value === "Canon 시작 UI 작품" && !button("+ 새 작품").disabled, "deletion status");
     check(button("삭제").disabled === blocked, "Deletion state mismatch");
@@ -48,17 +51,17 @@ async function exerciseCanonStart(reopened = false) {
   /** native 확인 응답을 제어하면서 한국어 확인 내용과 중복 여부를 검사한다. */
   window.confirm = (message) => { check(message.includes("Canon") || message.includes("항목"), "Korean confirmation"); confirmations++; return confirmed; };
   click("작품 관리");
-  await waitFor(() => button("+ 새 작품") && !button("+ 새 작품").disabled, "initial management");
+  await waitFor(() => isAvailable(button("+ 새 작품")), "initial management");
   click("+ 새 작품");
   await waitFor(() => document.getElementById("work-title")?.value === "", "new work");
   fill("work-title", "Canon 시작 UI 작품");
   click("저장");
-  await waitFor(() => document.querySelector(".work-success-message")?.textContent === "저장되었습니다." && !button("+ 새 작품").disabled, "saved work");
-  check(!button("삭제").disabled, "Initially deletable");
+  await waitFor(() => document.querySelector(".work-success-message")?.textContent === "저장되었습니다." && isAvailable(button("+ 새 작품")), "saved work");
+  check(isAvailable(button("삭제")), "Initially deletable");
   await selectConcept("Canon 시작 UI 작품");
   check(Boolean(button("Canon 시작")), "Start missing");
   click("Canon 시작");
-  await waitFor(() => button("Canon 시작") && !button("Canon 시작").disabled, "cancelled");
+  await waitFor(() => isAvailable(button("Canon 시작")), "cancelled");
   const work = (await window.novelCompany.works.getAll()).data.find((item) => item.title === "Canon 시작 UI 작품");
   check((await window.novelCompany.canon.spaces.getByWorkId(work.id)).data === null, "Cancel wrote space");
   confirmed = true;
@@ -87,10 +90,12 @@ async function exerciseCanonStart(reopened = false) {
   click("+ 새 항목");
   await waitFor(() => document.getElementById("canon-record-name"), "dynamic form");
   fill("canon-record-name", "UI 세계"); click("저장");
-  await waitFor(() => button("UI 세계") && button("삭제") && !button("삭제").disabled, "record created");
+  await waitFor(() => button("UI 세계") && isAvailable(button("삭제")), "record created");
   fill("canon-record-name", "UI 세계 수정"); click("저장");
-  await waitFor(() => button("UI 세계 수정") && !button("삭제").disabled, "record updated");
+  await waitFor(() => button("UI 세계 수정") && isAvailable(button("삭제")), "record updated");
+  const deleteConfirmationCount = confirmations;
   click("삭제");
+  await waitFor(() => confirmations === deleteConfirmationCount + 1, "record delete confirmation");
   await waitFor(() => !button("UI 세계 수정") && !document.getElementById("canon-record-name"), "record deleted");
   return { confirmations, checks: "Canon cancel/create/double-click/navigation/empty/deletion guard; existing definition/readiness/Record CRUD" };
 }

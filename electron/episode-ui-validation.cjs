@@ -67,6 +67,20 @@ async function exerciseEpisodes(mode = "normal") {
   click("삭제"); await waitFor(() => !episode(3) && !document.getElementById("episode-title") && !button("+ 새 회차").disabled, "delete 3");
   await create(3);
   episode(2).click(); await waitFor(() => document.getElementById("episode-number")?.value === "2", "select 2");
+  await fill("episode-content", "저장 전 컨텍스트 확인");
+  await waitFor(() => button("검토 시작") && !button("검토 시작").disabled, "review ready");
+  click("검토 시작");
+  await waitFor(() => document.body.textContent.includes("저장되지 않은 원고가 있습니다. 검토를 시작하려면 먼저 저장해 주세요."), "dirty review block");
+  click("작업 컨텍스트 확인");
+  await waitFor(() => document.body.textContent.includes("저장되지 않은 원고가 있습니다."), "dirty context block");
+  await save();
+  click("작업 컨텍스트 확인");
+  await waitFor(() => document.body.textContent.includes("이 작품에는 시작된 Canon이 없습니다."), "context IPC failure");
+  const reviewWork = (await window.novelCompany.works.getAll()).data.find((item) => item.title === "회차 UI 작품");
+  check((await window.novelCompany.canon.spaces.createForWork(reviewWork.id)).ok, "Review Canon fixture");
+  click("검토 시작");
+  await waitFor(() => document.body.textContent.includes("Stub 검토 완료: 실제 AI 검토 결과가 아닙니다."), "stub review result");
+  check(!document.body.textContent.includes("문제 없음"), "Stub must not claim no issues");
   await fill("episode-number", "7"); await fill("episode-status", "COMPLETED"); await fill("episode-content", "번호 변경 원고"); await save();
   check(!episode(2) && episode(7), "Number update list");
   await fill("episode-number", "1"); click("저장");
@@ -79,7 +93,7 @@ async function exerciseEpisodes(mode = "normal") {
   episode(1).click(); await waitFor(() => document.getElementById("episode-number")?.value === "1" && document.getElementById("episode-title")?.value === "UI 1", "discard");
   await fill("episode-content", "  재시작 원고\n둘째 줄\n"); await save();
   check(document.querySelector(".episode-counts").textContent.includes("3줄"), "Line counter");
-  return { checks: "empty/create/double-save/update/duplicate/delete/gap/dirty/close/counts" };
+  return { checks: "empty/create/double-save/update/duplicate/delete/gap/dirty/context-preview/review/close/counts" };
 }
 
 module.exports = { exerciseEpisodes };

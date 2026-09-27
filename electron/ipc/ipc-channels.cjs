@@ -25,6 +25,10 @@ const IPC_CHANNELS = Object.freeze({
   CANON_RECORD_CREATE: "canon:records:create",
   CANON_RECORD_UPDATE: "canon:records:update",
   CANON_RECORD_DELETE: "canon:records:delete",
+  CONTEXT_GET_EPISODE_WORK_CONTEXT: "context:get-episode-work-context",
+  REVIEW_START: "reviews:start",
+  REVIEW_GET_BY_EPISODE: "reviews:get-by-episode",
+  REVIEW_GET_BY_ID: "reviews:get-by-id",
 });
 
 module.exports = { IPC_CHANNELS };

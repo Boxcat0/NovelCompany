@@ -245,6 +245,20 @@ ConceptScreen의 별도 Canon 관리 영역에서 `handleDeleteCanon`이 `canLea
 
 성공 후 `loadCanonForWork → resetCanonEditor`가 이전 선택/폼/참조 상태를 비우고 현재 Work를 다시 조회한다. Canon 없음과 시작 버튼을 복원한다. Work 삭제와 Canon 삭제는 별도 동작이다. Work/Episode/TXT/다른 파일과 다른 작품의 Canon은 보존한다. 작품 관리 재진입 후 `handleSelectWork → getWorkDeletionStatus`에서 hasCanonSpace=false가 반영되며 Episode 0일 때만 Work 삭제가 다시 가능하다.
 
+## Task024 — Review Pipeline Foundation
+
+`Review Service → buildEpisodeWorkContext → source fingerprint → ReviewRun → Stub Review Processor → ReviewResult → Review Repository` 경로를 사용한다. Review는 TXT와 Canon의 derived read-only 작업 기록이며 원본 TXT, Episode metadata, Canon definition/record를 수정하지 않는다.
+
+Renderer는 `reviews.start`, `reviews.getByEpisode`, `reviews.getById`만 preload bridge로 호출한다. source hash 및 freshness 계산은 Main service가 수행하며, Renderer에는 경로·storageKey·raw error·SQL row를 노출하지 않는다. Stub processor는 `STUB_V1` metadata와 빈 findings만 반환하며 실제 AI 또는 문장/Canon 판정을 수행하지 않는다.
+
+## Task023 — Episode + Canon Read-only Work Context Builder
+
+Task023은 Renderer가 TXT, Episode metadata, Canon API를 여러 번 조합하지 않도록 Main Process에 Context Builder를 둔다.
+
+context:get-episode-work-context는 저장된 TXT와 같은 Work의 CanonSpace만 읽어 FULL_CANON DTO를 만든다. Builder는 Repository와 EpisodeStorage만 사용하며 직접 SQL, DB write, storage write, context persistence를 수행하지 않는다. Reference는 recordId/setKey/displayName으로, Option은 key/label로 해석한다. Renderer에는 storageKey, 파일 경로, SQL row, DB 객체를 노출하지 않는다.
+
+WorksScreen의 Context Preview는 저장되지 않은 draft가 있으면 요청을 차단하고, 최신 request sequence와 busy guard만 반영한다. Preview는 DB/TXT Source of Truth를 수정하지 않으며 Review, Canon 충돌 판정, Prompt, AI Provider 호출은 포함하지 않는다.
+
 ## Task022 — 현재 작품 Canon 작성과 명시적 Definition 복구
 
 작성 흐름은 `기초 설정 → 공간/집단 → 캐릭터 → 인물 확장`이다. ConceptScreen은 DB Set key를 안내 그룹에만 배치한다. Field/Reference/Option 정의와 실제 선택지를 Renderer에 복제하지 않는다. `Definition → getCreateReadiness → DynamicCanonForm → CanonRecord CRUD`를 재사용하며 구조 보기도 유지한다.

@@ -21,10 +21,12 @@ function initializeDatabase(databasePath = getDatabaseFilePath()) {
     const hasMigrations = connection.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'").get();
     const needsTask017 = hasMigrations && connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 3").get() && !connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 4").get();
     const needsTask022 = hasMigrations && connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 3").get() && !connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 5").get();
-    if (needsTask017 || needsTask022) {
+    const needsTask024 = hasMigrations && connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 5").get() && !connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 6").get();
+    if (needsTask017 || needsTask022 || needsTask024) {
       const backupDirectory = path.join(path.dirname(databasePath), "backups");
       fs.mkdirSync(backupDirectory, { recursive: true });
-      const backupPath = path.join(backupDirectory, (needsTask017 ? "before-task017-" : "before-task022-") + require("node:crypto").randomUUID() + ".db");
+      const backupPrefix = needsTask017 ? "before-task017-" : needsTask022 ? "before-task022-" : "before-task024-";
+      const backupPath = path.join(backupDirectory, backupPrefix + require("node:crypto").randomUUID() + ".db");
       connection.exec("VACUUM INTO '" + backupPath.replace(/'/g, "''") + "'");
     }
     runMigrations(connection, migrationsDirectory);

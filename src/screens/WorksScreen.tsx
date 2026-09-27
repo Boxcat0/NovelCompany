@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { EpisodeStatus } from "../types/episode";
-import type { IpcResult, StoredEpisode, StoredWork } from "../types/electron-api";
+import type {
+  IpcResult,
+  StoredEpisode,
+  StoredWork,
+  ReviewRun,
+  WorkContext,
+} from "../types/electron-api";
 
 const episodeStatusLabels: Record<EpisodeStatus, string> = { DRAFT: "초안", IN_PROGRESS: "작성 중", COMPLETED: "완료" };
 const workStatusLabels = { ACTIVE: "진행 중", PAUSED: "일시 중지", COMPLETED: "완결" };
@@ -34,14 +40,24 @@ function WorksScreen({ onNavigationState }: { onNavigationState?: (dirty: boolea
   const [episodesLoading, setEpisodesLoading] = useState(false);
   const [contentLoading, setContentLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [contextPreview, setContextPreview] = useState<WorkContext | null>(null);
+  const [contextLoading, setContextLoading] = useState(false);
+  const [contextError, setContextError] = useState("");
+  const [reviews, setReviews] = useState<ReviewRun[]>([]);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewStarting, setReviewStarting] = useState(false);
+  const [reviewError, setReviewError] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const requestPending = useRef(false);
   const contentRequestIdRef = useRef(0);
   const listRequestIdRef = useRef(0);
+  const contextRequestIdRef = useRef(0);
+  const reviewRequestIdRef = useRef(0);
+  const reviewStartRequestIdRef = useRef(0);
   const mounted = useRef(true);
   const dirty = draft !== null && (contentMissing || JSON.stringify(draft) !== baseline);
-  const busy = worksLoading || episodesLoading || contentLoading || saving;
+  const busy = worksLoading || episodesLoading || contentLoading || saving || contextLoading || reviewStarting;
 
   useEffect(() => {
     let cancelled = false;
@@ -53,7 +69,7 @@ function WorksScreen({ onNavigationState }: { onNavigationState?: (dirty: boolea
       finally { if (!cancelled) setWorksLoading(false); }
     }
     void loadWorks();
-    return () => { cancelled = true; mounted.current = false; contentRequestIdRef.current++; listRequestIdRef.current++; };
+    return () => { cancelled = true; mounted.current = false; contentRequestIdRef.current++; listRequestIdRef.current++; contextRequestIdRef.current++; reviewRequestIdRef.current++; reviewStartRequestIdRef.current++; };
   }, []);
   useEffect(() => { onNavigationState?.(dirty, busy); }, [dirty, busy, onNavigationState]);
   useEffect(() => {
@@ -70,8 +86,24 @@ function WorksScreen({ onNavigationState }: { onNavigationState?: (dirty: boolea
 
   /** 이전 TXT 요청을 무효화하고 선택/폼/복구 상태를 모두 초기화한다. */
   function resetEditor() {
-    contentRequestIdRef.current++; setSelectedEpisode(null); setDraft(null); setBaseline("");
+    contentRequestIdRef.current++; contextRequestIdRef.current++; reviewRequestIdRef.current++; reviewStartRequestIdRef.current++; setSelectedEpisode(null); setDraft(null); setBaseline("");
     setContentMissing(false); setReadBlocked(false); setContentLoading(false);
+    setContextPreview(null); setContextError(""); setContextLoading(false);
+    setReviews([]); setReviewError(""); setReviewLoading(false); setReviewStarting(false);
+  }
+
+  /** 현재 저장본 기준 Review history를 한 번 읽고 오래된 Episode 응답은 폐기한다. */
+  async function loadReviews(workId: string, episodeId: string) {
+    const requestId = ++reviewRequestIdRef.current;
+    setReviewLoading(true); setReviewError("");
+    try {
+      const items = readResult(await window.novelCompany.reviews.getByEpisode({ workId, episodeId }));
+      if (mounted.current && requestId === reviewRequestIdRef.current) setReviews(items);
+    } catch (cause) {
+      if (mounted.current && requestId === reviewRequestIdRef.current) setReviewError(cause instanceof EpisodeRequestError ? cause.message : "검토 기록을 불러오지 못했습니다.");
+    } finally {
+      if (mounted.current && requestId === reviewRequestIdRef.current) setReviewLoading(false);
+    }
   }
 
   /** 현재 요청 순서와 일치하는 작품의 목록만 적용하여 늦은 응답 덮어쓰기를 막는다. */
@@ -106,6 +138,7 @@ function WorksScreen({ onNavigationState }: { onNavigationState?: (dirty: boolea
       if (!content.ok && !missing) { setReadBlocked(true); throw new EpisodeRequestError(content.error.message); }
       const next = episodeDraft(current, content.ok ? content.data : "");
       setSelectedEpisode(current); setDraft(next); setBaseline(JSON.stringify(next)); setContentMissing(missing);
+      void loadReviews(selectedWork.id, current.id);
     } catch (cause) { if (mounted.current && requestId === contentRequestIdRef.current) { setReadBlocked(true); setError(cause instanceof EpisodeRequestError ? cause.message : "원고를 불러오지 못했습니다."); } }
     finally { if (mounted.current && requestId === contentRequestIdRef.current) setContentLoading(false); }
   }
@@ -143,8 +176,55 @@ function WorksScreen({ onNavigationState }: { onNavigationState?: (dirty: boolea
       const saved = readResult(selectedEpisode ? await window.novelCompany.episodes.update(selectedEpisode.id, input) : await window.novelCompany.episodes.create(input));
       const next = episodeDraft(saved, draft.content);
       setSelectedEpisode(saved); setDraft(next); setBaseline(JSON.stringify(next)); setContentMissing(false);
-      await loadEpisodes(selectedWork.id); setMessage("저장되었습니다.");
+      await loadEpisodes(selectedWork.id); void loadReviews(selectedWork.id, saved.id); setMessage("저장되었습니다.");
     });
+  }
+
+  /** 저장되지 않은 draft를 제외하고 현재 선택 Episode의 저장된 TXT와 Canon Context만 미리 본다. */
+  async function handlePreviewWorkContext() {
+    if (!selectedWork || !selectedEpisode || contextLoading) return;
+    if (dirty) {
+      setContextError("저장되지 않은 원고가 있습니다. 작업 컨텍스트를 확인하려면 먼저 저장해 주세요.");
+      return;
+    }
+    const requestId = ++contextRequestIdRef.current;
+    const episodeId = selectedEpisode.id;
+    setContextLoading(true); setContextError(""); setContextPreview(null);
+    try {
+      const context = readResult(await window.novelCompany.context.getEpisodeWorkContext({
+        workId: selectedWork.id,
+        episodeId,
+      }));
+      if (!mounted.current || requestId !== contextRequestIdRef.current || selectedEpisode.id !== episodeId) return;
+      setContextPreview(context);
+    } catch (cause) {
+      if (mounted.current && requestId === contextRequestIdRef.current) {
+        setContextError(cause instanceof EpisodeRequestError ? cause.message : "작업 컨텍스트를 불러오지 못했습니다.");
+      }
+    } finally {
+      if (mounted.current && requestId === contextRequestIdRef.current) setContextLoading(false);
+    }
+  }
+
+  /** dirty draft를 차단하고 저장된 WorkContext만 사용해 Stub ReviewRun을 새로 시작한다. */
+  async function handleStartReview() {
+    if (!selectedWork || !selectedEpisode || reviewStarting || busy) return;
+    if (dirty) {
+      setReviewError("저장되지 않은 원고가 있습니다. 검토를 시작하려면 먼저 저장해 주세요.");
+      return;
+    }
+    const requestId = ++reviewStartRequestIdRef.current;
+    const episodeId = selectedEpisode.id;
+    setReviewStarting(true); setReviewError("");
+    try {
+      readResult(await window.novelCompany.reviews.start({ workId: selectedWork.id, episodeId }));
+      if (!mounted.current || requestId !== reviewStartRequestIdRef.current || selectedEpisode.id !== episodeId) return;
+      await loadReviews(selectedWork.id, episodeId);
+    } catch (cause) {
+      if (mounted.current && requestId === reviewStartRequestIdRef.current) setReviewError(cause instanceof EpisodeRequestError ? cause.message : "검토 작업을 시작하지 못했습니다.");
+    } finally {
+      if (mounted.current && requestId === reviewStartRequestIdRef.current) setReviewStarting(false);
+    }
   }
 
   /** dirty 폐기 후 저장된 회차 이름으로 확인하고 metadata/TXT 통합 삭제 뒤 선택을 비운다. */
@@ -191,6 +271,44 @@ function WorksScreen({ onNavigationState }: { onNavigationState?: (dirty: boolea
               <p className="episode-counts">{draft.content.length.toLocaleString("ko-KR")}자 / {(draft.content === "" ? 0 : draft.content.split(/\r\n|\r|\n/).length).toLocaleString("ko-KR")}줄</p>
               <div className="work-management-actions"><button type="submit" disabled={busy}>저장</button>{selectedEpisode && <button type="button" disabled={busy} onClick={() => void handleDeleteEpisode()}>삭제</button>}</div>
             </fieldset>
+            {selectedEpisode && <button type="button" className="context-preview-button" disabled={busy} onClick={() => void handlePreviewWorkContext()}>작업 컨텍스트 확인</button>}
+            {contextError && <p className="error-message" role="alert">{contextError}</p>}
+            {contextLoading && <p role="status">작업 컨텍스트를 구성하는 중입니다.</p>}
+            {contextPreview && <section className="context-preview" aria-label="작업 컨텍스트 미리보기">
+              <h3>작업 컨텍스트</h3>
+              <p>저장된 원고 기준 · {contextPreview.episode.episodeNumber}화 · {contextPreview.episode.content.length.toLocaleString("ko-KR")}자</p>
+              <p>Canon Set {contextPreview.canon.summary.setCount}개 · Record {contextPreview.canon.summary.recordCount}개</p>
+              {contextPreview.canon.sets.length === 0 ? <p>등록된 Canon Definition이 없습니다.</p> : <ul className="context-set-summary">
+                {contextPreview.canon.sets.map((set) => <li key={set.key}>{set.label} <strong>{set.recordCount}</strong></li>)}
+              </ul>}
+              <details>
+                <summary>Canon 상세 펼치기</summary>
+                {contextPreview.canon.sets.map((set) => <section className="context-set-detail" key={set.key}>
+                  <h4>{set.label}</h4>
+                  {set.records.length === 0 ? <p>등록된 Record가 없습니다.</p> : <ul>
+                    {set.records.map((record) => <li key={record.id}><strong>{record.displayName}</strong><ul>
+                      {record.fields.map((field) => <li key={field.key}>{field.label}: {typeof field.value === "string" || typeof field.value === "number" || typeof field.value === "boolean" ? String(field.value) : field.value === null ? "없음" : Array.isArray(field.value) ? field.value.map((item) => "label" in item ? item.label : item.displayName).join(", ") : "label" in field.value ? field.value.label : field.value.displayName}</li>)}
+                    </ul></li>)}
+                  </ul>}
+                </section>)}
+              </details>
+            </section>}
+            {selectedEpisode && <section className="review-panel" aria-label="검토">
+              <h3>검토</h3>
+              <p>Stub Processor는 실제 문장·Canon 검토를 수행하지 않으며, Review Pipeline 연결 상태만 확인합니다.</p>
+              <button type="button" disabled={busy || reviewLoading} onClick={() => void handleStartReview()}>{reviewStarting ? "검토 시작 중…" : "검토 시작"}</button>
+              {reviewError && <p className="error-message" role="alert">{reviewError}</p>}
+              {reviewLoading && <p role="status">검토 기록을 불러오는 중입니다.</p>}
+              {!reviewLoading && reviews.length === 0 && <p>최근 검토가 없습니다.</p>}
+              {!reviewLoading && reviews.length > 0 && <ul className="review-history">
+                {reviews.map((review) => <li key={review.id}>
+                  <strong>{review.status}</strong> · {review.processorKey} · {new Date(review.createdAt).toLocaleString("ko-KR")}
+                  <p>{review.status === "COMPLETED" ? "Stub 검토 완료: 실제 AI 검토 결과가 아닙니다." : review.status === "FAILED" ? "검토 작업을 완료하지 못했습니다." : "검토가 진행 중입니다."}</p>
+                  <p>{review.freshness.isCurrent ? "현재 원고/Canon과 일치합니다." : `${review.freshness.episodeChanged ? "원고가 변경됨" : ""}${review.freshness.episodeChanged && review.freshness.canonChanged ? " · " : ""}${review.freshness.canonChanged ? "Canon이 변경됨" : ""}`}</p>
+                  {review.findings.length > 0 && <ul>{review.findings.map((finding) => <li key={finding.id}>[{finding.category}] {finding.message}</li>)}</ul>}
+                </li>)}
+              </ul>}
+            </section>}
           </form> : !contentLoading && !readBlocked && <p>회차를 선택하거나 새 회차를 작성하세요.</p>}
         </div>
       </div>

@@ -51,6 +51,67 @@ export type CanonRecordSummary = CanonScope & { id: string; displayName: string;
 export type CanonRecord = CanonRecordSummary & CanonRecordInput;
 export type CreateReadiness = { canCreate: boolean; blockers: Array<{ targetSetId: string; targetSetName: string; requiredCount: number; currentCount: number }> };
 export type ReferenceOption = { id: string; displayName: string; disabled: boolean; description: string | null };
+export type WorkContextReference = {
+  recordId: string;
+  setKey: string;
+  displayName: string;
+};
+export type WorkContextOption = { key: string; label: string };
+export type WorkContextFieldValue =
+  | string
+  | number
+  | boolean
+  | null
+  | WorkContextOption
+  | WorkContextReference
+  | WorkContextOption[]
+  | WorkContextReference[];
+export type WorkContext = {
+  scope: "FULL_CANON";
+  work: { id: string; title: string };
+  episode: {
+    id: string;
+    episodeNumber: number;
+    title: string;
+    status: EpisodeStatus;
+    content: string;
+    contentHash: string | null;
+  };
+  canon: {
+    summary: { setCount: number; recordCount: number };
+    sets: Array<{
+      key: string;
+      label: string;
+      recordCount: number;
+      records: Array<{
+        id: string;
+        displayName: string;
+        fields: Array<{
+          key: string;
+          label: string;
+          valueType: string;
+          value: WorkContextFieldValue;
+        }>;
+      }>;
+    }>;
+  };
+};
+
+export type ReviewFindingCategory = "TYPO" | "SPACING" | "GRAMMAR" | "CANON" | "OTHER";
+export type ReviewFinding = { id: string; category: ReviewFindingCategory; message: string; sortOrder: number; createdAt: string };
+export type ReviewRun = {
+  id: string;
+  workId: string;
+  episodeId: string;
+  status: "RUNNING" | "COMPLETED" | "FAILED";
+  processorKey: string;
+  source: { episodeContentHash: string; canonContextHash: string };
+  freshness: { isCurrent: boolean; episodeChanged: boolean; canonChanged: boolean };
+  findings: ReviewFinding[];
+  createdAt: string;
+  startedAt: string;
+  completedAt: string | null;
+};
 
 export type CreateWorkInput = {
   title: string;
@@ -120,6 +181,17 @@ export interface NovelCompanyApi {
       getByCanonSpaceId(canonSpaceId: string): Promise<IpcResult<CanonSet[]>>;
       getDefinition(setId: string): Promise<IpcResult<CanonSetDefinition | null>>;
     };
+  };
+  context: {
+    getEpisodeWorkContext(input: {
+      workId: string;
+      episodeId: string;
+    }): Promise<IpcResult<WorkContext>>;
+  };
+  reviews: {
+    start(input: { workId: string; episodeId: string }): Promise<IpcResult<ReviewRun>>;
+    getByEpisode(input: { workId: string; episodeId: string }): Promise<IpcResult<ReviewRun[]>>;
+    getById(reviewRunId: string): Promise<IpcResult<ReviewRun>>;
   };
 }
 

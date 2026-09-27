@@ -427,6 +427,80 @@ h1 {
   color: #617087;
 }
 
+.context-preview-button {
+  margin-top: 16px;
+  padding: 8px 12px;
+  border: 1px solid #8aa7c9;
+  border-radius: 6px;
+  color: #17365f;
+  background: #edf3f9;
+  font: inherit;
+  cursor: pointer;
+}
+
+.context-preview-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.context-preview {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid #d5dde8;
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.context-preview h3,
+.context-preview h4 {
+  margin: 0;
+  color: #2a3a53;
+}
+
+.context-preview p {
+  margin: 8px 0;
+  color: #617087;
+}
+
+.review-panel {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid #d5dde8;
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.review-panel h3,
+.review-panel p {
+  margin: 0 0 8px;
+}
+
+.review-history {
+  margin: 12px 0 0;
+  padding-left: 20px;
+}
+
+.review-history > li + li {
+  margin-top: 12px;
+}
+
+.context-set-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 6px 16px;
+  margin: 12px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.context-set-summary strong {
+  margin-left: 6px;
+}
+
+.context-set-detail {
+  margin-top: 14px;
+}
+
 @media (max-width: 900px) {
   .viewer-layout {
     grid-template-columns: 210px minmax(0, 1fr);

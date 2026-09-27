@@ -452,6 +452,20 @@ display_name은 별도 필수값이다. `validateCharacterRequirements`는 creat
 
 Task016 Single Source의 원본은 11 Set/30 Field/4 Option이다. 별도 명시적 Bootstrap은 원본 정의를 순서대로 복원한 뒤 같은 transaction에서 현재 required 정책으로 정제한다. CanonSpace ID는 유지하고 Record는 0개로 유지한다. Canon 시작에서 자동 설치하지 않으며 부분 정의는 merge하지 않는다. 운영 적용 전후 점검 결과는 0/0/0/0 → 11/30/4/0이었다.
 
+## 16. Task024 — ReviewRun / ReviewFinding
+
+`review_runs`는 `id`, `work_id`, `episode_id`, `status(RUNNING|COMPLETED|FAILED)`, `processor_key`, `episode_content_hash`, `canon_context_hash`, `error_code`, 생성/시작/완료 시각을 보존한다. Work와 Episode FK는 `ON DELETE RESTRICT`이며 cascade를 사용하지 않는다. Episode별 RUNNING Run은 partial unique index로 하나만 허용한다.
+
+`review_findings`는 Run별 immutable 결과로 `id`, `review_run_id`, `category`, `message`, `sort_order`, `created_at`을 보관한다. 원고 본문, WorkContext JSON, Canon JSON은 어느 review table에도 저장하지 않는다. freshness는 저장된 두 hash와 현재 WorkContext에서 한 번 계산한 hash를 비교하는 derived DTO이며 DB status를 STALE로 바꾸지 않는다.
+
+## 15. Task023 — Derived WorkContext
+
+WorkContext는 DB table, migration, snapshot이 아닌 요청 시점의 derived read model이다. 저장된 Episode TXT와 Episode metadata, 동일 Work의 Generic Canon을 조합해 생성하며 다시 DB에 저장하지 않는다.
+
+WorkContext = scope(FULL_CANON) + work(id,title) + episode(id,number,title,status,TXT content,contentHash) + canon(summary, sets, records, fields)
+
+Scalar empty value는 null, OPTION_ONE은 null 또는 key/label 객체, OPTION_MANY는 배열, REFERENCE_ONE은 null 또는 recordId/setKey/displayName 객체, REFERENCE_MANY는 배열이다. Work/Episode/Canon record ID는 안정적인 identity로 남기되 Set/Field/Option의 내부 ID와 storageKey/파일 경로는 public DTO에서 제외한다.
+
 ## 12. Task018 — Work metadata CRUD
 
 기존 works의 id/title/description/status/created_at/updated_at을 그대로 사용한다. Schema 변경과 신규 migration은 없다. title은 필수 문자열이며 trim 후 저장하고 중복을 허용한다. description은 optional string/null이며 Work DTO의 description은 기존처럼 string(null → 빈 문자열)이다. status는 ACTIVE/PAUSED/COMPLETED, 기본값은 ACTIVE다.

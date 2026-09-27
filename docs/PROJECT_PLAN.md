@@ -134,6 +134,21 @@
 - Character DB 등록
 - Pixel Office 배치
 
+## Task024 — Review Pipeline Foundation + Stub Processor
+
+- migration 006: `review_runs`, `review_findings`, source hash 및 immutable history
+- WorkContext를 유일한 Review 입력으로 사용하는 Main-side Review Service
+- RUNNING / COMPLETED / FAILED lifecycle, duplicate RUNNING 차단, transaction completion
+- `STUB_V1` processor와 Review history/freshness 최소 UI
+- 실제 AI 검토, diff/승인, 원고 또는 Canon 자동 변경은 후속 범위
+
+## Task023 — Episode + Canon Read-only Work Context Builder
+
+- 저장된 Episode TXT와 Generic Canon을 Main Process에서 WorkContext로 조합
+- FULL_CANON read-only DTO, Option/Reference resolution, Context Preview
+- Review Pipeline Foundation으로 연결 예정
+- Review 결과/승인 UX, AI Provider와 실제 AI 호출은 후속 범위
+
 ## Phase 14 — Packaging / Production
 
 - Windows EXE

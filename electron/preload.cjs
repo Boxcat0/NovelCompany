@@ -83,6 +83,22 @@ function getNextAvailableEpisodeNumber(workId) {
 }
 
 /**
+ * 저장된 Episode TXT와 해당 Work의 Canon을 조합한 읽기 전용 Context를 Main Process에 요청한다.
+ */
+function getEpisodeWorkContext(input) {
+  return ipcRenderer.invoke("context:get-episode-work-context", input);
+}
+
+/** 저장된 Episode와 Canon 기준으로 Stub ReviewRun을 시작하도록 Main에 요청한다. */
+function startReview(input) { return ipcRenderer.invoke("reviews:start", input); }
+
+/** 현재 source freshness가 계산된 Episode Review history를 Main에서 읽는다. */
+function getReviewsByEpisode(input) { return ipcRenderer.invoke("reviews:get-by-episode", input); }
+
+/** Run ID 하나의 현재 source freshness와 finding을 Main에서 읽는다. */
+function getReviewById(reviewRunId) { return ipcRenderer.invoke("reviews:get-by-id", reviewRunId); }
+
+/**
  * Work에 연결된 CanonSpace 조회 요청을 Main Process로 전달한다.
  */
 function getCanonSpaceByWorkId(workId) {
@@ -141,6 +157,10 @@ function exposeNovelCompanyApi() {
         getDefinition: getCanonSetDefinition,
       },
     },
+    context: {
+      getEpisodeWorkContext,
+    },
+    reviews: { start: startReview, getByEpisode: getReviewsByEpisode, getById: getReviewById },
   });
 }
 

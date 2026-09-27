@@ -8,6 +8,8 @@ const { executeIpcAction } = require("./ipc-action.cjs");
 const { IPC_CHANNELS } = require("./ipc-channels.cjs");
 const { registerEpisodeHandlers } = require("./episode-handlers.cjs");
 const { registerCanonHandlers } = require("./canon-handlers.cjs");
+const { registerContextHandlers } = require("./context-handlers.cjs");
+const { registerReviewHandlers } = require("./review-handlers.cjs");
 const { createNovelCompanyApi } = require("./preload-api.cjs");
 const { registerWorkHandlers } = require("./work-handlers.cjs");
 const { LocalEpisodeStorage } = require("../storage/local-episode-storage.cjs");
@@ -88,9 +90,13 @@ async function runValidation() {
     registerWorkHandlers(ipcMain);
     registerCanonHandlers(ipcMain);
     registerEpisodeHandlers(ipcMain, episodeStorage);
+    registerContextHandlers(ipcMain, episodeStorage);
+    registerReviewHandlers(ipcMain, episodeStorage);
     registerWorkHandlers(ipcMain);
     registerCanonHandlers(ipcMain);
     registerEpisodeHandlers(ipcMain, episodeStorage);
+    registerContextHandlers(ipcMain, episodeStorage);
+    registerReviewHandlers(ipcMain, episodeStorage);
 
     const channels = Object.values(IPC_CHANNELS);
     assert.equal(new Set(channels).size, channels.length);
@@ -185,6 +191,26 @@ async function runValidation() {
       ok: true,
       data: expectedContent,
     });
+    const getEpisodeWorkContext = ipcMain.handlers.get(
+      IPC_CHANNELS.CONTEXT_GET_EPISODE_WORK_CONTEXT,
+    );
+    const contextResult = await getEpisodeWorkContext(null, {
+      workId: work.id,
+      episodeId: episode.id,
+    });
+    assert.equal(contextResult.ok, true);
+    assert.equal(contextResult.data.scope, "FULL_CANON");
+    assert.equal(contextResult.data.episode.content, expectedContent);
+    assert.equal(contextResult.data.canon.summary.setCount, 1);
+    assert.equal("storageKey" in contextResult.data.episode, false);
+    const startReview = ipcMain.handlers.get(IPC_CHANNELS.REVIEW_START);
+    const reviewResult = await startReview(null, { workId: work.id, episodeId: episode.id });
+    assert.equal(reviewResult.ok, true);
+    assert.equal(reviewResult.data.status, "COMPLETED");
+    assert.equal(reviewResult.data.processorKey, "STUB_V1");
+    assert.deepEqual(reviewResult.data.findings, []);
+    const getReviewsByEpisode = ipcMain.handlers.get(IPC_CHANNELS.REVIEW_GET_BY_EPISODE);
+    assert.equal((await getReviewsByEpisode(null, { workId: work.id, episodeId: episode.id })).data.length, 1);
     expectFailure(
       await readEpisodeContent(null, "missing-episode"),
       "EPISODE_NOT_FOUND",
@@ -273,6 +299,10 @@ async function runValidation() {
     await api.canon.spaces.getByWorkId("work-id");
     await api.canon.sets.getByCanonSpaceId("canon-space-id");
     await api.canon.sets.getDefinition("canon-set-id");
+    await api.context.getEpisodeWorkContext({ workId: "work-id", episodeId: "episode-id" });
+    await api.reviews.start({ workId: "work-id", episodeId: "episode-id" });
+    await api.reviews.getByEpisode({ workId: "work-id", episodeId: "episode-id" });
+    await api.reviews.getById("review-id");
     assert.deepEqual(
       invokedChannels.map((invocation) => invocation.channel),
       [
@@ -288,6 +318,10 @@ async function runValidation() {
         IPC_CHANNELS.CANON_SPACE_GET_BY_WORK_ID,
         IPC_CHANNELS.CANON_SETS_GET_BY_CANON_SPACE_ID,
         IPC_CHANNELS.CANON_SET_GET_DEFINITION,
+        IPC_CHANNELS.CONTEXT_GET_EPISODE_WORK_CONTEXT,
+        IPC_CHANNELS.REVIEW_START,
+        IPC_CHANNELS.REVIEW_GET_BY_EPISODE,
+        IPC_CHANNELS.REVIEW_GET_BY_ID,
       ],
     );
     assert.equal("ipcRenderer" in api, false);
@@ -320,6 +354,10 @@ async function runValidation() {
       "getByCanonSpaceId",
       "getDefinition",
     ]);
+    assert.deepEqual(Object.keys(runtimePreloadApi.context), [
+      "getEpisodeWorkContext",
+    ]);
+    assert.deepEqual(Object.keys(runtimePreloadApi.reviews), ["start", "getByEpisode", "getById"]);
     assert.equal("ipcRenderer" in runtimePreloadApi, false);
     assert.equal("require" in runtimePreloadApi, false);
 
@@ -336,6 +374,10 @@ async function runValidation() {
       runtimePreloadApi.canon.spaces.getByWorkId("work-id"),
       runtimePreloadApi.canon.sets.getByCanonSpaceId("canon-space-id"),
       runtimePreloadApi.canon.sets.getDefinition("canon-set-id"),
+      runtimePreloadApi.context.getEpisodeWorkContext({ workId: "work-id", episodeId: "episode-id" }),
+      runtimePreloadApi.reviews.start({ workId: "work-id", episodeId: "episode-id" }),
+      runtimePreloadApi.reviews.getByEpisode({ workId: "work-id", episodeId: "episode-id" }),
+      runtimePreloadApi.reviews.getById("review-id"),
     ]);
     assert.deepEqual(
       runtimeInvocations.map((result) => result.data.channel),
@@ -352,6 +394,10 @@ async function runValidation() {
         IPC_CHANNELS.CANON_SPACE_GET_BY_WORK_ID,
         IPC_CHANNELS.CANON_SETS_GET_BY_CANON_SPACE_ID,
         IPC_CHANNELS.CANON_SET_GET_DEFINITION,
+        IPC_CHANNELS.CONTEXT_GET_EPISODE_WORK_CONTEXT,
+        IPC_CHANNELS.REVIEW_START,
+        IPC_CHANNELS.REVIEW_GET_BY_EPISODE,
+        IPC_CHANNELS.REVIEW_GET_BY_ID,
       ],
     );
 

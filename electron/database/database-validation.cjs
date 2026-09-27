@@ -54,11 +54,11 @@ async function runValidation() {
   try {
     const database = initializeDatabase(path.join(temporaryRoot, "novelcompany.db"));
     const tableNames = new Set(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name));
-    for (const tableName of ["schema_migrations", "works", "episodes", "canon_spaces", "canon_sets", "canon_fields", "canon_field_options", "canon_records", "canon_field_values", "canon_record_option_values", "canon_record_references", "worlds", "locations", "organizations", "characters", "attributes", "character_attributes", "skills", "character_skills", "authorities", "servants", "contracts", "passives", "character_passives", "character_relationships"]) {
+    for (const tableName of ["schema_migrations", "works", "episodes", "review_runs", "review_findings", "canon_spaces", "canon_sets", "canon_fields", "canon_field_options", "canon_records", "canon_field_values", "canon_record_option_values", "canon_record_references", "worlds", "locations", "organizations", "characters", "attributes", "character_attributes", "skills", "character_skills", "authorities", "servants", "contracts", "passives", "character_passives", "character_relationships"]) {
       assert.equal(tableNames.has(tableName), true, "Missing table: " + tableName);
     }
     assert.equal(database.prepare("PRAGMA foreign_keys").get().foreign_keys, 1);
-    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 5);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 6);
 
     insertWorkAndEpisode(database, "work-a");
     insertWorkAndEpisode(database, "work-b");
@@ -189,6 +189,7 @@ async function runValidation() {
     validateTask017Migration(temporaryRoot);
     require("./canon-authoring-validation.cjs").validateAuthoringMigration(temporaryRoot);
     require("./canon-bootstrap-validation.cjs").validateCanonBootstrap(temporaryRoot);
+    validateTask024Migration(temporaryRoot);
     console.log("Database validation passed.");
   } finally {
     closeDatabase();
@@ -206,13 +207,13 @@ function validateTask017Migration(temporaryRoot) {
   const scopes = createCanonFixture();
   const saved = records.create(scopes.world, inputFor(scopes.world, "보존 검증", { description: "기존 입력 보존" }));
   connection.exec("UPDATE canon_fields SET required = 0 WHERE key IN ('origin_world', 'origin_location', 'current_location', 'attributes', 'passives', 'location')");
-  connection.exec("DELETE FROM schema_migrations WHERE version >= 4");
+  connection.exec("DROP TABLE review_findings; DROP TABLE review_runs; DELETE FROM schema_migrations WHERE version >= 4");
   const beforeFields = connection.prepare("SELECT id, canon_set_id, key, value_type FROM canon_fields ORDER BY id").all();
   closeDatabase();
   const migrated = initializeDatabase(databasePath);
   assert.deepEqual(migrated.prepare("SELECT id, canon_set_id, key, value_type FROM canon_fields ORDER BY id").all(), beforeFields);
   assert.deepEqual(records.getById(scopes.world, saved.id), saved);
-  assert.equal(migrated.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 5);
+  assert.equal(migrated.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 6);
   const { CANON_SETS } = require("./setup/setup-initial-novel-canon.cjs");
   for (const set of CANON_SETS) {
     for (const field of set.fields) assert.equal(migrated.prepare("SELECT required FROM canon_fields WHERE canon_set_id = ? AND key = ?").get(scopes[set.key].setId, field[0]).required, Number(field[4]));
@@ -231,6 +232,27 @@ function validateTask017Migration(temporaryRoot) {
   assert.equal(fs.readdirSync(backupDirectory).length, 1);
   closeDatabase();
   console.log("Task017 migration backup, preservation and restart validation passed.");
+}
+
+/** 005 상태의 기존 Work/Episode/Canon DB가 006 Review schema로 백업 후 안전하게 확장되는지 검증한다. */
+function validateTask024Migration(temporaryRoot) {
+  const databasePath = path.join(temporaryRoot, "migration-task024.db");
+  const connection = initializeDatabase(databasePath);
+  insertWorkAndEpisode(connection, "review-migration-work");
+  connection.exec("DROP TABLE review_findings; DROP TABLE review_runs; DELETE FROM schema_migrations WHERE version >= 6");
+  closeDatabase();
+  const migrated = initializeDatabase(databasePath);
+  assert.equal(migrated.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 6);
+  assert.equal(migrated.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'review_runs'").get().count, 1);
+  assert.equal(migrated.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'review_findings'").get().count, 1);
+  assert.equal(migrated.prepare("SELECT id FROM episodes WHERE id = ?").get("review-migration-work-episode").id, "review-migration-work-episode");
+  assert.deepEqual(migrated.prepare("PRAGMA foreign_key_check").all(), []);
+  const backups = fs.readdirSync(path.join(temporaryRoot, "backups")).filter((file) => file.startsWith("before-task024-"));
+  assert.equal(backups.length, 1);
+  const backup = new DatabaseSync(path.join(temporaryRoot, "backups", backups[0]), { readOnly: true });
+  try { assert.equal(backup.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 5); } finally { backup.close(); }
+  closeDatabase();
+  console.log("Task024 migration backup, 005-to-006 schema and preservation passed.");
 }
 
 runValidation().catch((error) => {

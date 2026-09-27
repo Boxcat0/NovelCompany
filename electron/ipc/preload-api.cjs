@@ -69,6 +69,19 @@ function createNovelCompanyApi(ipcRenderer) {
           ipcRenderer.invoke(IPC_CHANNELS.CANON_SET_GET_DEFINITION, setId),
       },
     },
+    context: {
+      /** 저장된 원고와 Canon을 Main-side builder에서 조합하도록 요청한다. */
+      getEpisodeWorkContext: (input) =>
+        ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_GET_EPISODE_WORK_CONTEXT, input),
+    },
+    reviews: {
+      /** 검토 lifecycle 시작 요청을 고정 channel로 전달한다. */
+      start: (input) => ipcRenderer.invoke(IPC_CHANNELS.REVIEW_START, input),
+      /** 현재 source freshness를 포함한 Episode history 요청을 전달한다. */
+      getByEpisode: (input) => ipcRenderer.invoke(IPC_CHANNELS.REVIEW_GET_BY_EPISODE, input),
+      /** 지정 ReviewRun 단건 요청을 전달한다. */
+      getById: (reviewRunId) => ipcRenderer.invoke(IPC_CHANNELS.REVIEW_GET_BY_ID, reviewRunId),
+    },
   };
 }
 
