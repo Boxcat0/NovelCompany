@@ -1,5 +1,19 @@
 # NovelCompany 아키텍처
 
+## Task025 — Scene-aware ReviewContext
+
+저장된 TXT → `buildEpisodeWorkContext(FULL_CANON)` → `buildReviewContext(RELEVANT_CANON_V1)` → `STUB_V1` → ReviewRun. Preview도 `buildEpisodeReviewContext`를 통해 동일 순수 builder를 사용한다. 분석은 메모리에서만 계산하고 Work/Episode/TXT 및 Canon은 쓰지 않는다. Repository에서 원고와 Canon을 중복 조합하지 않는다.
+
+`parseNotation`은 인용 문맥을 보존하며 시스템 알림을 먼저 식별하고 독립된 줄의 대괄호를 장소 표제로 처리한다. `{권속 : 이름}` → SERVANT, 나머지 단일 콜론 → AUTHORITY, 콜론 없는 중괄호 → Skill/Passive Canon 대조 순서다. 큰따옴표는 DIALOGUE, 작은따옴표는 INNER_OR_CONTRACT_DIALOGUE다. 인용문 안 표기는 quoteContext를 보존하고 장소 전환/사용자 판정에는 쓰지 않는다. 빈/미종결/중첩 기호는 경고하며 원문은 그대로 둔다. 범위는 JavaScript UTF-16 code unit의 `[start,end)`다.
+
+Scene은 장소 표제에서만 분리하며 알림·표제·서문·연속 표제를 포함해 원문을 누락 없이 보존한다. LF/CRLF와 한글/Unicode를 정규화하지 않는다. `그 시각`은 timeHintRaw로 보존하며 동시성을 추정하지 않는다. 미등록/동명 장소도 Scene을 분리하고 연결은 NOT_FOUND/AMBIGUOUS로 유지한다. 화자는 UNKNOWN이며 CHARACTER/EXTERNAL DTO 확장은 가능하지만 자동 추정이나 CRUD는 없다.
+
+Canon은 11개 Generic Set의 displayName을 긴 이름 우선으로 검색하고 명시 표기 유형으로 후보 Set을 제한한다. 직접 언급은 물리적 등장을 뜻하지 않는다. 핵심 Character의 실제 7개 참조 필드(origin_world/origin_location/current_location/organization/attributes/skills/passives) 및 Authority/Servant의 owner_character 역참조를 읽는다. 관계(source_character/target_character)·계약(grantor_character/grantee_character)은 핵심 Character 한쪽만 일치해도 모두 수집한다. 핵심 집합은 확장 전에 고정하고 관계 상대는 기존 Reference identity만 제공한다. 상대 전체 Canon/관계를 재귀 수집하지 않으며 중복 Record를 제거하고 Scene별 여러 선택 이유를 보존한다.
+
+소유 검증은 단일 Character 이름+조사+능력 표기+사용했다/발동했다/사용한다/발동한다의 제한적 서술 문장만 사용한다. 대사/내면 대화, 대명사, 단순 근접 이름은 사용자 근거로 쓰지 않는다. Skill/Passive Canon을 각각 조회해 정확히 한 후보일 때만 분류하고 실제 skills/passives recordId를 비교한다. 불일치 후보는 설정 오류 확정이 아니다. 권능 콜론의 좌우 값은 현재 Definition에 확정 매핑이 없어 유형만 판정하고 연결은 UNRESOLVED다.
+
+`context:get-episode-review-context` → self-contained preload → WorksScreen → ReviewContextPreview. 저장되지 않은 draft는 차단하고 request sequence로 이전 회차 응답을 폐기한다. 상세는 읽기 전용 펼치기이며 편집/Canon 포함 제외 기능은 없다. 구조 분석과 빈 Stub Findings는 별개이며 실제 AI 검토 완료를 주장하지 않는다. 기존 FULL_CANON API와 Preview도 보존한다.
+
 ## 문서 범위
 
 이 문서는 현재 확정된 시스템 방향과 설계 원칙을 기록한다. 향후 확장 항목은 계획이며, 현재 구현되었다는 뜻이 아니다.

@@ -98,6 +98,18 @@ export type WorkContext = {
 };
 
 export type ReviewFindingCategory = "TYPO" | "SPACING" | "GRAMMAR" | "CANON" | "OTHER";
+export type SourceRange = { start: number; end: number };
+export type CanonResolution = { status: 'MATCHED' | 'NOT_FOUND' | 'AMBIGUOUS' | 'UNRESOLVED'; recordId: string | null; candidateIds: string[] };
+export type NotationOccurrence = { type: string; raw: string; range: SourceRange; quoteContext: string | null; canonType?: string; resolution?: CanonResolution };
+export type ReviewContext = {
+  scope: 'RELEVANT_CANON'; selectorVersion: 'RELEVANT_CANON_V1'; rangeUnit: 'UTF16_HALF_OPEN';
+  work: WorkContext['work']; episode: WorkContext['episode'];
+  scenes: Array<{ index: number; originalRange: SourceRange; locationHeading: string | null; timeHintRaw: string | null; locationCandidate: string | null; resolvedLocation: CanonResolution; narration: { type: 'CHARACTER' | 'EXTERNAL' | 'UNKNOWN'; characterId: string | null }; notationOccurrences: NotationOccurrence[]; directMentions: Array<CanonResolution & { name: string; range: SourceRange }>; selectedCanonIds: string[] }>;
+  relevantCanon: { selectedSets: Array<{ key: string; label: string }>; selectedRecords: Array<WorkContext['canon']['sets'][number]['records'][number] & { setKey: string; setLabel: string }>; selectionReasons: Array<{ recordId: string; reason: string; sceneIndex: number; sourceRecordId: string | null; range: SourceRange | null }> };
+  abilityOwnershipChecks: Array<{ raw: string; range: SourceRange; sceneIndex: number; type: string; abilityRecordId: string | null; actorCharacterId: string | null; result: 'MATCHED' | 'MISMATCH_CANDIDATE' | 'UNVERIFIABLE_OWNER' | 'CANON_NOT_FOUND' | 'AMBIGUOUS'; evidence: string; unresolvedReason: string | null }>;
+  unresolvedMentions: Array<{ raw: string; range: SourceRange; sceneIndex: number; status: 'UNKNOWN' | 'AMBIGUOUS'; candidateIds: string[] }>;
+  warnings: Array<{ range: SourceRange; message: string }>;
+};
 export type ReviewFinding = { id: string; category: ReviewFindingCategory; message: string; sortOrder: number; createdAt: string };
 export type ReviewRun = {
   id: string;
@@ -105,8 +117,8 @@ export type ReviewRun = {
   episodeId: string;
   status: "RUNNING" | "COMPLETED" | "FAILED";
   processorKey: string;
-  source: { episodeContentHash: string; canonContextHash: string };
-  freshness: { isCurrent: boolean; episodeChanged: boolean; canonChanged: boolean };
+  source: { episodeContentHash: string; canonContextHash: string; contextMode: 'FULL_CANON_V1' | 'RELEVANT_CANON_V1' };
+  freshness: { isCurrent: boolean; episodeChanged: boolean; canonChanged: boolean; contextChanged: boolean; canonComparison: 'COMPARABLE' | 'UNDETERMINED_EPISODE_CHANGED' };
   findings: ReviewFinding[];
   createdAt: string;
   startedAt: string;
@@ -183,6 +195,7 @@ export interface NovelCompanyApi {
     };
   };
   context: {
+    getEpisodeReviewContext(input: { workId: string; episodeId: string }): Promise<IpcResult<ReviewContext>>;
     getEpisodeWorkContext(input: {
       workId: string;
       episodeId: string;

@@ -70,6 +70,8 @@ function createNovelCompanyApi(ipcRenderer) {
       },
     },
     context: {
+      /** 읽기 전용 Scene 및 Relevant Canon 분석을 Main에 요청한다. */
+      getEpisodeReviewContext: (input) => ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_GET_EPISODE_REVIEW_CONTEXT, input),
       /** 저장된 원고와 Canon을 Main-side builder에서 조합하도록 요청한다. */
       getEpisodeWorkContext: (input) =>
         ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_GET_EPISODE_WORK_CONTEXT, input),

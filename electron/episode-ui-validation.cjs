@@ -1,4 +1,4 @@
-/** 실제 sandbox Renderer에서 회차 편집, dirty 보호, 번호 재사용과 재시작 원고를 검증한다. */
+/** 실제 sandbox Renderer에서 회차 편집, 읽기 전용 ReviewContext, 지연 응답 보호 및 재시작을 검증한다. */
 async function exerciseEpisodes(mode = "normal") {
   /** React/IPC가 목표 상태를 반영할 때까지 제한 시간 안에서 기다린다. */
   async function waitFor(predicate, label) {
@@ -48,6 +48,17 @@ async function exerciseEpisodes(mode = "normal") {
       return { staleReadIgnored: true };
     }
     await waitFor(() => document.getElementById("episode-content"), "loaded manuscript");
+    if (mode === 'context-race') {
+      click('작업 컨텍스트 확인');
+      await waitFor(() => document.body.textContent.includes('작업 컨텍스트를 구성하는 중입니다.'), 'Context pending');
+      await new Promise(resolve => setTimeout(resolve, 80));
+      episode(4).click();
+      await waitFor(() => document.getElementById('episode-number')?.value === '4', 'Context switched');
+      await new Promise(resolve => setTimeout(resolve, 650));
+      check(!document.querySelector('[aria-label="검토 컨텍스트 미리보기"]'), 'Late context must be ignored');
+      check(!document.body.textContent.includes('작업 컨텍스트를 구성하는 중입니다.'), 'Old request must not hold loading');
+      return { staleContextIgnored: true };
+    }
     if (mode === "missing") {
       check(document.body.textContent.includes("저장하면 새 원고 파일을 생성"), "Missing recovery hint");
       check(document.body.textContent.includes("저장하지 않은 변경사항"), "Missing must be dirty");
@@ -67,7 +78,7 @@ async function exerciseEpisodes(mode = "normal") {
   click("삭제"); await waitFor(() => !episode(3) && !document.getElementById("episode-title") && !button("+ 새 회차").disabled, "delete 3");
   await create(3);
   episode(2).click(); await waitFor(() => document.getElementById("episode-number")?.value === "2", "select 2");
-  await fill("episode-content", "저장 전 컨텍스트 확인");
+  await fill("episode-content", '[헤븐즈]\n나는 {미등록 능력}을 사용했다. 그분\n[알림 : 내용]');
   await waitFor(() => button("검토 시작") && !button("검토 시작").disabled, "review ready");
   click("검토 시작");
   await waitFor(() => document.body.textContent.includes("저장되지 않은 원고가 있습니다. 검토를 시작하려면 먼저 저장해 주세요."), "dirty review block");
@@ -78,6 +89,17 @@ async function exerciseEpisodes(mode = "normal") {
   await waitFor(() => document.body.textContent.includes("이 작품에는 시작된 Canon이 없습니다."), "context IPC failure");
   const reviewWork = (await window.novelCompany.works.getAll()).data.find((item) => item.title === "회차 UI 작품");
   check((await window.novelCompany.canon.spaces.createForWork(reviewWork.id)).ok, "Review Canon fixture");
+  click('작업 컨텍스트 확인');
+  await waitFor(() => document.querySelector('[aria-label="검토 컨텍스트 미리보기"]'), 'ReviewContext preview');
+  const preview = document.querySelector('[aria-label="검토 컨텍스트 미리보기"]');
+  check(preview.textContent.includes('Scene 1개') && preview.textContent.includes('능력 Canon 미등록'), 'Scene and ownership preview');
+  check(preview.textContent.includes('그분') && preview.textContent.includes('미확정'), 'Unresolved mention preview');
+  check(preview.querySelectorAll('button,input,textarea,select').length === 0, 'Preview must be read-only');
+  episode(1).click();
+  await waitFor(() => document.getElementById('episode-number')?.value === '1', 'Preview switch');
+  check(!document.querySelector('[aria-label="검토 컨텍스트 미리보기"]'), 'Previous Episode preview must be cleared');
+  episode(2).click();
+  await waitFor(() => document.getElementById('episode-number')?.value === '2' && !button('검토 시작').disabled, 'Return for review');
   click("검토 시작");
   await waitFor(() => document.body.textContent.includes("Stub 검토 완료: 실제 AI 검토 결과가 아닙니다."), "stub review result");
   check(!document.body.textContent.includes("문제 없음"), "Stub must not claim no issues");

@@ -8,7 +8,15 @@ const { LocalEpisodeStorage } = require("../storage/local-episode-storage.cjs");
 const records = require("../database/repositories/canon-record-repository.cjs");
 const repository = require("../database/repositories/review-repository.cjs");
 const { createCanonFixture, inputFor } = require("../database/canon-record-validation.cjs");
+const { getCanonDefinitionBySetId } = require('../database/repositories/canon-definition-repository.cjs');
+
+/** 격리 fixture의 실제 Option Definition에서 저장 가능한 ID를 찾는다. */
+function optionId(scope, key, value) {
+  return getCanonDefinitionBySetId(scope.setId).fields.find(field => field.key === key).options.find(option => option.value === value).id;
+}
 const { getReviewsByEpisode, startEpisodeReview } = require("./review-service.cjs");
+const { buildCanonContextHash } = require('./review-service.cjs');
+const { buildEpisodeWorkContext } = require('../context/episode-work-context-builder.cjs');
 
 /** 지정 오류 code와 한국어 사용자 메시지로 Review 요청이 실패하는지 확인한다. */
 async function expectFailure(action, code) {
@@ -25,7 +33,7 @@ function sourceSnapshot(storage, episode) {
   };
 }
 
-/** Temp DB에서 ReviewRun persistence, failure, history, freshness와 source read-only 규칙을 통합 검증한다. */
+/** Temp DB에서 FULL/RELEVANT 호환, migration 007, persistence, failure, freshness와 원본 보존을 검증한다. */
 async function runValidation() {
   const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "novel-company-review-"));
   process.env.NOVEL_COMPANY_DATA_DIR = temporaryRoot;
@@ -42,6 +50,7 @@ async function runValidation() {
     assert.equal(first.processorKey, "STUB_V1");
     assert.deepEqual(first.findings, []);
     assert.equal(first.freshness.isCurrent, true);
+    assert.equal(first.source.contextMode, 'RELEVANT_CANON_V1');
     assert.deepEqual(sourceSnapshot(storage, episode), before);
     assert.equal(getDatabase().prepare("SELECT COUNT(*) AS count FROM review_runs").get().count, 1);
     assert.equal(getDatabase().prepare("SELECT COUNT(*) AS count FROM review_findings").get().count, 0);
@@ -50,9 +59,15 @@ async function runValidation() {
     assert.notEqual(first.id, second.id);
     assert.equal((await getReviewsByEpisode(storage, { workId, episodeId: episode.id })).length, 2);
 
-    const synthetic = repository.createRun({ workId, episodeId: episode.id, processorKey: "TEST", episodeContentHash: first.source.episodeContentHash, canonContextHash: first.source.canonContextHash });
+    const fullHash = buildCanonContextHash((await buildEpisodeWorkContext(storage, { workId, episodeId: episode.id })).canon);
+    const synthetic = repository.createRun({ workId, episodeId: episode.id, processorKey: "TEST", episodeContentHash: first.source.episodeContentHash, canonContextHash: fullHash });
     const withFinding = repository.completeRun(synthetic.id, [{ category: "OTHER", message: "Synthetic finding" }]);
     assert.equal(withFinding.findings[0].message, "Synthetic finding");
+    assert.equal((await getReviewsByEpisode(storage, { workId, episodeId: episode.id })).find(item => item.id === synthetic.id).freshness.isCurrent, true);
+    records.create(scope.world, inputFor(scope.world, '무관한 세계'));
+    const unrelated = await getReviewsByEpisode(storage, { workId, episodeId: episode.id });
+    assert.equal(unrelated.find(item => item.id === first.id).freshness.isCurrent, true);
+    assert.equal(unrelated.find(item => item.id === synthetic.id).freshness.canonChanged, true);
 
     const running = repository.createRun({ workId, episodeId: episode.id, processorKey: "TEST", episodeContentHash: first.source.episodeContentHash, canonContextHash: first.source.canonContextHash });
     await expectFailure(() => startEpisodeReview(storage, { workId, episodeId: episode.id }), "REVIEW_ALREADY_RUNNING");
@@ -72,20 +87,46 @@ async function runValidation() {
       assert.deepEqual(incomplete.findings, []);
     } finally { getDatabase().exec("DROP TRIGGER review_complete_failure"); }
 
-    const updated = updateEpisodeWithContent(storage, episode.id, { workId, episodeNumber: 1, title: episode.title, status: episode.status, content: "변경된 원고입니다." });
+    const updated = updateEpisodeWithContent(storage, episode.id, { workId, episodeNumber: 1, title: episode.title, status: episode.status, content: "변경된 원고입니다. Review Canon 변경" });
     const afterEpisodeChange = await getReviewsByEpisode(storage, { workId, episodeId: episode.id });
     const episodeOnlyStale = afterEpisodeChange.find((item) => item.id === first.id);
     assert.equal(episodeOnlyStale.freshness.episodeChanged, true);
     assert.equal(episodeOnlyStale.freshness.canonChanged, false);
+    assert.equal(episodeOnlyStale.freshness.canonComparison, 'UNDETERMINED_EPISODE_CHANGED');
     const episodeCurrentRun = await startEpisodeReview(storage, { workId, episodeId: episode.id });
     records.create(scope.world, inputFor(scope.world, "Review Canon 변경"));
     const afterCanonChange = await getReviewsByEpisode(storage, { workId, episodeId: episode.id });
     const bothStale = afterCanonChange.find((item) => item.id === first.id);
     assert.equal(bothStale.freshness.episodeChanged, true);
-    assert.equal(bothStale.freshness.canonChanged, true);
+    assert.equal(bothStale.freshness.canonChanged, false);
     const canonOnlyStale = afterCanonChange.find((item) => item.id === episodeCurrentRun.id);
     assert.equal(canonOnlyStale.freshness.episodeChanged, false);
     assert.equal(canonOnlyStale.freshness.canonChanged, true);
+
+    const relevantWorld = records.getBySetId(scope.world).find(item => item.displayName === 'Review Canon 변경');
+    const selectedRun = await startEpisodeReview(storage, { workId, episodeId: episode.id });
+    records.update(scope.world, relevantWorld.id, inputFor(scope.world, relevantWorld.displayName, { description: '관련 값 변경' }));
+    assert.equal((await getReviewsByEpisode(storage, { workId, episodeId: episode.id })).find(item => item.id === selectedRun.id).freshness.canonChanged, true);
+
+    const location = records.create(scope.location, inputFor(scope.location, '헤븐즈', { world: relevantWorld.id }));
+    const attribute = records.create(scope.attribute, inputFor(scope.attribute, '검증 속성'));
+    const passive = records.create(scope.passive, inputFor(scope.passive, '공통 패시브', { passive_type: optionId(scope.passive, 'passive_type', 'COMMON') }));
+    const skill = records.create(scope.skill, inputFor(scope.skill, '버티컬 슬래쉬'));
+    const characterValues = { origin_location: location.id, attributes: [attribute.id], passives: [passive.id], skills: [skill.id] };
+    const actor = records.create(scope.character, inputFor(scope.character, '한지수', characterValues));
+    const partner = records.create(scope.character, inputFor(scope.character, '이카로스', characterValues));
+    const abilityEpisode = createEpisodeWithContent(storage, { workId, episodeNumber: 3, title: '참조 검증', content: '한지수는 {버티컬 슬래쉬}를 사용했다.' });
+    const abilityInput = { workId, episodeId: abilityEpisode.id };
+    const abilityRun = await startEpisodeReview(storage, abilityInput);
+    records.create(scope.relationship, inputFor(scope.relationship, '새 관계', { source_character: actor.id, target_character: partner.id, relationship_type: '동료' }));
+    assert.equal((await getReviewsByEpisode(storage, abilityInput)).find(item => item.id === abilityRun.id).freshness.canonChanged, true);
+    const relationshipRun = await startEpisodeReview(storage, abilityInput);
+    records.update(scope.character, actor.id, inputFor(scope.character, actor.displayName, { ...characterValues, skills: [] }));
+    assert.equal((await getReviewsByEpisode(storage, abilityInput)).find(item => item.id === relationshipRun.id).freshness.canonChanged, true);
+    const noSkillRun = await startEpisodeReview(storage, abilityInput);
+    const anotherPassive = records.create(scope.passive, inputFor(scope.passive, '다른 패시브', { passive_type: optionId(scope.passive, 'passive_type', 'COMMON') }));
+    records.update(scope.character, actor.id, inputFor(scope.character, actor.displayName, { ...characterValues, skills: [], passives: [anotherPassive.id] }));
+    assert.equal((await getReviewsByEpisode(storage, abilityInput)).find(item => item.id === noSkillRun.id).freshness.canonChanged, true);
 
     const missing = createEpisodeWithContent(storage, { workId, episodeNumber: 2, title: "누락 원고", content: "" });
     const missingRow = getDatabase().prepare("SELECT work_id, storage_key FROM episodes WHERE id = ?").get(missing.id);
@@ -98,6 +139,16 @@ async function runValidation() {
     initializeDatabase(path.join(temporaryRoot, "novelcompany.db"));
     assert.ok((await getReviewsByEpisode(storage, { workId, episodeId: updated.id })).length >= 5);
     assert.deepEqual(getDatabase().prepare("PRAGMA foreign_key_check").all(), []);
+    // 006 당시 schema와 legacy Run만 남긴 격리 DB를 다시 열어 007의 기본 모드 및 hash 보존을 검증한다.
+    getDatabase().prepare('DELETE FROM review_findings WHERE review_run_id <> ?').run(synthetic.id);
+    getDatabase().prepare('DELETE FROM review_runs WHERE id <> ?').run(synthetic.id);
+    getDatabase().exec('ALTER TABLE review_runs DROP COLUMN context_mode; DELETE FROM schema_migrations WHERE version = 7');
+    closeDatabase();
+    initializeDatabase(path.join(temporaryRoot, 'novelcompany.db'));
+    const migratedLegacy = repository.getById(synthetic.id);
+    assert.equal(migratedLegacy.contextMode, 'FULL_CANON_V1');
+    assert.equal(migratedLegacy.canonContextHash, fullHash);
+    assert.equal(migratedLegacy.findings[0].message, 'Synthetic finding');
     console.log("Task024 Review pipeline validation passed.");
   } finally {
     closeDatabase();

@@ -1,5 +1,15 @@
 # NovelCompany 데이터 모델 설계
 
+## Task025 — 파생 ReviewContext V1 및 migration 007
+
+ReviewContext는 DB 엔터티/저장 snapshot이 아니다. scope=RELEVANT_CANON, selectorVersion=RELEVANT_CANON_V1, rangeUnit=UTF16_HALF_OPEN, work, episode, scenes, relevantCanon, abilityOwnershipChecks, unresolvedMentions, warnings로 구성한다. episode는 저장 원문을 한 번 포함한다.
+
+scenes는 index, originalRange, locationHeading, timeHintRaw, locationCandidate, resolvedLocation(status/recordId/candidateIds), narration(type/characterId), notationOccurrences, directMentions, selectedCanonIds를 포함한다. relevantCanon은 selectedSets(key/label), selectedRecords(기존 public record + setKey/setLabel), selectionReasons(recordId/reason/sceneIndex/sourceRecordId/range)다. 관계 상대 identity는 선택된 관계/계약의 Reference value에 포함되고 상대 전체 Record를 중복 저장하지 않는다. selectionReasons의 RELATED_PARTICIPANT는 이 identity 제공 경로를 나타낸다.
+
+abilityOwnershipChecks는 raw/range/sceneIndex/type/abilityRecordId/actorCharacterId/result/evidence/unresolvedReason이다. unresolvedMentions는 raw/range/sceneIndex/status/candidateIds, warnings는 range/message다. 원시 DB 행, storageKey, 파일 경로는 포함하지 않는다. Scene/분석 DTO는 향후 AI Reviewer 입력으로 사용할 수 있지만 현재 STUB_V1 Findings와 분리한다.
+
+`007_add_review_context_mode.sql`은 review_runs에 `context_mode TEXT NOT NULL DEFAULT 'FULL_CANON_V1' CHECK(context_mode IN ('FULL_CANON_V1','RELEVANT_CANON_V1'))`만 추가한다. 001~006과 기존 해시는 수정하지 않는다. 신규 Review는 관련 Canon hash를 저장하며 Findings/lifecycle/FK 정책은 유지한다. freshness는 isCurrent/episodeChanged/canonChanged/contextChanged/canonComparison 파생 DTO다. 원고가 변경된 RELEVANT 모드의 canonComparison은 UNDETERMINED_EPISODE_CHANGED이며 독립 Canon 변경 여부를 확정하지 않는다.
+
 ## 1. 목적과 범위
 
 이 문서는 SQLite와 migration 001~005의 논리 데이터 모델 및 TXT 저장소 경계를 정의한다. `node:sqlite`로 `C:\NovelCompanyData\novelcompany.db`를 생성하고 순차 migration을 적용한다. 현재 Work 관리, Canon Record CRUD 및 CanonSpace 시작/삭제, Episode CRUD와 TXT 편집을 구현했다. CanonSet/Field 구조 편집과 틀 복사는 후속 범위다.

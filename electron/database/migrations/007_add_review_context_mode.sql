@@ -1,0 +1,2 @@
+ALTER TABLE review_runs ADD COLUMN context_mode TEXT NOT NULL DEFAULT 'FULL_CANON_V1'
+  CHECK (context_mode IN ('FULL_CANON_V1', 'RELEVANT_CANON_V1'));

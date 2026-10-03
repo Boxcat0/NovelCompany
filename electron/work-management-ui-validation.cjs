@@ -236,6 +236,15 @@ async function runValidation() {
     episodeStorage.readEpisodeByStorageKey = async (key) => { if (key === firstKey) await new Promise((resolve) => setTimeout(resolve, 300)); return originalRead(key); };
     await window.webContents.executeJavaScript("(" + exerciseEpisodes.toString() + ")(\"race\")");
     episodeStorage.readEpisodeByStorageKey = originalRead;
+    const reviewContextChannel = 'context:get-episode-review-context';
+    ipcMain.removeHandler(reviewContextChannel);
+    /** ReviewContext 응답을 지연시켜 회차 전환 후 이전 결과가 화면을 덮지 않는지 확인한다. */
+    ipcMain.handle(reviewContextChannel, (_event, input) => require('./ipc/ipc-action.cjs').executeIpcAction(reviewContextChannel, async () => {
+      const context = await require('./context/review-context-builder.cjs').buildEpisodeReviewContext(episodeStorage, input);
+      await new Promise(resolve => setTimeout(resolve, 500));
+      return context;
+    }));
+    const contextRaceResult = await window.webContents.executeJavaScript('(' + exerciseEpisodes.toString() + ')("context-race")');
     const episodeScreenshotPath = path.join(artifactsRoot, "episode-editor.png");
     fs.writeFileSync(episodeScreenshotPath, (await window.webContents.capturePage()).toPNG());
     assert.deepEqual(getDatabase().prepare("PRAGMA foreign_key_check").all(), []);
@@ -256,7 +265,7 @@ async function runValidation() {
       return definition;
     }));
     const authoringRaceResult = await window.webContents.executeJavaScript("(" + exerciseCanonAuthoring.toString() + ")('race')");
-    const report = { authoringResult, authoringRaceResult, authoringScreenshotPath, episodeResult, episodeScreenshotPath, result: "PASS", ...result, canonResult, deletionResult, persistence: "DB connection reopen + Renderer reload", screenshotPath, canonScreenshotPath, emptyScreenshotPath, deletionScreenshotPath, temporaryRoot, database: "isolated temporary DB" };
+    const report = { contextRaceResult, authoringResult, authoringRaceResult, authoringScreenshotPath, episodeResult, episodeScreenshotPath, result: "PASS", ...result, canonResult, deletionResult, persistence: "DB connection reopen + Renderer reload", screenshotPath, canonScreenshotPath, emptyScreenshotPath, deletionScreenshotPath, temporaryRoot, database: "isolated temporary DB" };
     fs.writeFileSync(path.join(artifactsRoot, "result.json"), JSON.stringify(report, null, 2));
     console.log(JSON.stringify(report));
   } catch (error) {

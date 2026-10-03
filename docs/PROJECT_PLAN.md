@@ -1,5 +1,15 @@
 # NovelCompany 개발 계획
 
+## Task025 — Scene-aware Relevant Canon Selector + ReviewContext V1
+
+- 원고 기호 및 Scene parser, UTF-16 원문 범위와 경고 보존.
+- Generic Canon 직접 탐지, Character 참조 및 Authority/Servant 역참조, 관계/계약 1-hop 선택.
+- Skill/Passive Canon 분류 및 명시 단일 주체의 보유 참조 검증; UNKNOWN/AMBIGUOUS/불일치 후보 보존.
+- 읽기 전용 ReviewContext Preview, dirty 차단, 이전 회차 응답 폐기.
+- STUB_V1 입력 연결, migration 007의 FULL/RELEVANT 모드 분리와 과거 이력 보존.
+- test:review-context 및 기존 격리 DB/IPC/Electron UI 검증.
+- 실제 AI, 화자 지정 CRUD, 별명/대명사 추론, 권능 좌우 매핑 규칙은 후속 작업.
+
 ## 현재 Canon 개발 순서
 
 - Task018: Work Management CRUD 및 안전한 작품 삭제 — COMPLETE.

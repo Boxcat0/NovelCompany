@@ -1,3 +1,5 @@
+import { ReviewContextPreview } from '../components/ReviewContextPreview';
+import type { ReviewContext } from '../types/electron-api';
 import { useEffect, useRef, useState } from "react";
 import type { EpisodeStatus } from "../types/episode";
 import type {
@@ -40,6 +42,7 @@ function WorksScreen({ onNavigationState }: { onNavigationState?: (dirty: boolea
   const [episodesLoading, setEpisodesLoading] = useState(false);
   const [contentLoading, setContentLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [reviewContextPreview, setReviewContextPreview] = useState<ReviewContext | null>(null);
   const [contextPreview, setContextPreview] = useState<WorkContext | null>(null);
   const [contextLoading, setContextLoading] = useState(false);
   const [contextError, setContextError] = useState("");
@@ -88,7 +91,7 @@ function WorksScreen({ onNavigationState }: { onNavigationState?: (dirty: boolea
   function resetEditor() {
     contentRequestIdRef.current++; contextRequestIdRef.current++; reviewRequestIdRef.current++; reviewStartRequestIdRef.current++; setSelectedEpisode(null); setDraft(null); setBaseline("");
     setContentMissing(false); setReadBlocked(false); setContentLoading(false);
-    setContextPreview(null); setContextError(""); setContextLoading(false);
+    setContextPreview(null); setReviewContextPreview(null); setContextError(""); setContextLoading(false);
     setReviews([]); setReviewError(""); setReviewLoading(false); setReviewStarting(false);
   }
 
@@ -180,7 +183,7 @@ function WorksScreen({ onNavigationState }: { onNavigationState?: (dirty: boolea
     });
   }
 
-  /** 저장되지 않은 draft를 제외하고 현재 선택 Episode의 저장된 TXT와 Canon Context만 미리 본다. */
+  /** dirty draft를 차단하고 저장본의 Work/ReviewContext를 미리 보며 이전 회차 응답은 폐기한다. */
   async function handlePreviewWorkContext() {
     if (!selectedWork || !selectedEpisode || contextLoading) return;
     if (dirty) {
@@ -189,13 +192,16 @@ function WorksScreen({ onNavigationState }: { onNavigationState?: (dirty: boolea
     }
     const requestId = ++contextRequestIdRef.current;
     const episodeId = selectedEpisode.id;
-    setContextLoading(true); setContextError(""); setContextPreview(null);
+    setContextLoading(true); setContextError(""); setContextPreview(null); setReviewContextPreview(null);
     try {
       const context = readResult(await window.novelCompany.context.getEpisodeWorkContext({
         workId: selectedWork.id,
         episodeId,
       }));
       if (!mounted.current || requestId !== contextRequestIdRef.current || selectedEpisode.id !== episodeId) return;
+      const reviewContext = readResult(await window.novelCompany.context.getEpisodeReviewContext({ workId: selectedWork.id, episodeId }));
+      if (!mounted.current || requestId !== contextRequestIdRef.current) return;
+      setReviewContextPreview(reviewContext);
       setContextPreview(context);
     } catch (cause) {
       if (mounted.current && requestId === contextRequestIdRef.current) {
@@ -293,6 +299,7 @@ function WorksScreen({ onNavigationState }: { onNavigationState?: (dirty: boolea
                 </section>)}
               </details>
             </section>}
+            {reviewContextPreview && <ReviewContextPreview context={reviewContextPreview} />}
             {selectedEpisode && <section className="review-panel" aria-label="검토">
               <h3>검토</h3>
               <p>Stub Processor는 실제 문장·Canon 검토를 수행하지 않으며, Review Pipeline 연결 상태만 확인합니다.</p>
@@ -305,6 +312,7 @@ function WorksScreen({ onNavigationState }: { onNavigationState?: (dirty: boolea
                   <strong>{review.status}</strong> · {review.processorKey} · {new Date(review.createdAt).toLocaleString("ko-KR")}
                   <p>{review.status === "COMPLETED" ? "Stub 검토 완료: 실제 AI 검토 결과가 아닙니다." : review.status === "FAILED" ? "검토 작업을 완료하지 못했습니다." : "검토가 진행 중입니다."}</p>
                   <p>{review.freshness.isCurrent ? "현재 원고/Canon과 일치합니다." : `${review.freshness.episodeChanged ? "원고가 변경됨" : ""}${review.freshness.episodeChanged && review.freshness.canonChanged ? " · " : ""}${review.freshness.canonChanged ? "Canon이 변경됨" : ""}`}</p>
+                  {review.freshness.canonComparison === "UNDETERMINED_EPISODE_CHANGED" && <p>원고가 바뀌어 관련 Canon의 독립적인 변경 여부는 판정할 수 없습니다. 저장본 기준으로 다시 실행해 주세요.</p>}
                   {review.findings.length > 0 && <ul>{review.findings.map((finding) => <li key={finding.id}>[{finding.category}] {finding.message}</li>)}</ul>}
                 </li>)}
               </ul>}

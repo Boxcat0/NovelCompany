@@ -89,6 +89,11 @@ function getEpisodeWorkContext(input) {
   return ipcRenderer.invoke("context:get-episode-work-context", input);
 }
 
+/** 저장된 원고의 읽기 전용 Scene 및 Relevant Canon 분석을 요청한다. */
+function getEpisodeReviewContext(input) {
+  return ipcRenderer.invoke('context:get-episode-review-context', input);
+}
+
 /** 저장된 Episode와 Canon 기준으로 Stub ReviewRun을 시작하도록 Main에 요청한다. */
 function startReview(input) { return ipcRenderer.invoke("reviews:start", input); }
 
@@ -159,6 +164,7 @@ function exposeNovelCompanyApi() {
     },
     context: {
       getEpisodeWorkContext,
+      getEpisodeReviewContext,
     },
     reviews: { start: startReview, getByEpisode: getReviewsByEpisode, getById: getReviewById },
   });

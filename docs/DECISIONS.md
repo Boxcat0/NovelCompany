@@ -1,5 +1,15 @@
 # NovelCompany 아키텍처 결정 기록
 
+## Task025 — 관련 Canon 및 불확실성 보존
+
+FULL_CANON 입력을 유지하고 새 ReviewContext는 WorkContext만 받아 순수 분석한다. Generic Canon 외 저장소를 보지 않는다. 이름 중첩은 긴 이름이 차지한 원문 범위만 우선하고 다른 위치의 짧은 이름은 유지한다. 동명 Record는 명시 Set으로 좁혀도 여러 후보이면 AMBIGUOUS다. 관계/계약은 핵심 Character 한 명만 연결되어도 모두 포함하며 1-hop 이후 상대 Character의 참조/관계는 확장하지 않는다.
+
+그분/그 녀석/그녀석/그 사람은 미확정 지시 표현 후보로 위치만 기록한다. 복선 의미나 정체를 추정하지 않는다. Scene 화자는 UNKNOWN이다. 콜론 없는 중괄호는 skill/passive 모두 대조하고 정확히 한 후보일 때만 유형을 정한다. 소유 판정은 명시 단일 사용자 문장과 Reference ID 일치에 한해 확인한다. MATCHED, MISMATCH_CANDIDATE, UNVERIFIABLE_OWNER, CANON_NOT_FOUND, AMBIGUOUS를 구분한다. 미보유는 불일치 후보이며 실제 설정 오류로 단정하지 않는다. 권능 표기 좌우와 authority.base_skill/displayName 사이의 확정 규칙은 없으므로 자동 연결하지 않는다.
+
+007의 context_mode 기본값 FULL_CANON_V1은 과거 해시와 이력을 그대로 보존한다. 신규 Run은 RELEVANT_CANON_V1이다. 기존 전체 해시는 기존 알고리즘으로 비교하고 신규 해시는 selectorVersion, 선택된 Set/Record/field의 실제 값과 참조, 동명 후보 identity를 결정적으로 정렬·직렬화한다. 전체 총수, 시각, 원문 범위/선택 이유는 해시에 넣지 않는다. 무관한 Canon 변경은 신규 해시에 영향이 없고 관련 관계/계약 추가 및 능력 소유 참조 변경은 반영한다.
+
+신규 Run의 episodeChanged가 true이면 canonChanged=false를 독립 비교 결과로 해석하지 않는다. canonComparison=UNDETERMINED_EPISODE_CHANGED로 표시하며 contextChanged는 관련 입력 해시 변화만 나타낸다. 저장 정보만으로 원고 선택 집합 변화와 Canon DB 변경을 독립 분리할 수 없어 UI에 판정 불가 안내를 표시한다. 원고가 같을 때 canonChanged는 관련 Canon 입력 변화다. Preview는 저장본 기준 읽기 전용이며 실제 AI 호출과 원본 수정은 없다.
+
 이 문서는 현재까지 확정된 기술 및 설계 결정을 ADR(Architecture Decision Record) 형식으로 기록한다. 구현 상태와 결정 자체는 구분한다.
 
 ## Decision 001 — Electron을 Windows Desktop 기반으로 사용한다

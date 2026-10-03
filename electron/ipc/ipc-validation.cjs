@@ -203,6 +203,12 @@ async function runValidation() {
     assert.equal(contextResult.data.episode.content, expectedContent);
     assert.equal(contextResult.data.canon.summary.setCount, 1);
     assert.equal("storageKey" in contextResult.data.episode, false);
+    const reviewContextResult = await ipcMain.handlers.get(IPC_CHANNELS.CONTEXT_GET_EPISODE_REVIEW_CONTEXT)(null, { workId: work.id, episodeId: episode.id });
+    assert.equal(reviewContextResult.ok, true);
+    assert.equal(reviewContextResult.data.scope, 'RELEVANT_CANON');
+    assert.equal(reviewContextResult.data.episode.content, expectedContent);
+    assert.equal('storageKey' in reviewContextResult.data.episode, false);
+    assert.equal((await ipcMain.handlers.get(IPC_CHANNELS.CONTEXT_GET_EPISODE_REVIEW_CONTEXT)(null, { workId: 'missing', episodeId: episode.id })).ok, false);
     const startReview = ipcMain.handlers.get(IPC_CHANNELS.REVIEW_START);
     const reviewResult = await startReview(null, { workId: work.id, episodeId: episode.id });
     assert.equal(reviewResult.ok, true);
@@ -356,6 +362,7 @@ async function runValidation() {
     ]);
     assert.deepEqual(Object.keys(runtimePreloadApi.context), [
       "getEpisodeWorkContext",
+      "getEpisodeReviewContext",
     ]);
     assert.deepEqual(Object.keys(runtimePreloadApi.reviews), ["start", "getByEpisode", "getById"]);
     assert.equal("ipcRenderer" in runtimePreloadApi, false);
