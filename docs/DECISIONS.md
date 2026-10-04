@@ -1,5 +1,17 @@
 # NovelCompany 아키텍처 결정 기록
 
+## Task026 — 제출과 실행의 분리
+
+작가의 제출은 영속 ReviewJob이고 실제 Processor 실행은 기존 ReviewRun이다. `review_jobs.queue_sequence`를 SQLite AUTOINCREMENT로 배정해 같은 밀리초 제출도 FIFO로 처리한다. Episode 활성 Job과 전역 RUNNING Job은 각각 partial unique index로 한 개만 허용한다. 별도 Episode lock boolean은 저장하지 않는다. 취소는 QUEUED에서만 조건부 UPDATE하고 이력을 삭제하지 않는다.
+
+제출 fingerprint는 원고 hash와 RELEVANT_CANON_V1 모드의 V2 hash다. Worker가 선점 직전 다시 생성한 Context와 비교해 달라지면 RESUBMIT_REQUIRED로 끝내고, 읽기 실패는 FAILED로 기록한다. RUNNING 이후 Canon 변경은 고정된 실행 입력을 교체하지 않으며 기존 freshness가 결과를 오래된 것으로 표시한다. 앱 재시작은 RUNNING Job/Run을 REVIEW_INTERRUPTED로 실패 처리하고 QUEUED만 재개한다. 새 AI API·재시도·원고 교정은 도입하지 않는다.
+
+## Task025-HF01 — 기존 Skill 보존과 Review 버전
+
+Skill의 필요 속성은 Attribute 1개를 가리키며 같은 Attribute를 여러 Skill이 참조할 수 있다. 신규 Skill은 필수 입력이고 기존 미설정 Skill에는 속성을 자동 부여하지 않는다. Repository는 업그레이드 전 미설정이던 Skill만 null 상태 수정을 허용한다. 미설정 Skill을 보완한 뒤 null로 되돌리는 수정은 거부한다. Dynamic Form은 실제 Definition과 동일 작품의 Reference options를 사용한다.
+
+008은 기존 정의에 Field만 멱등적으로 추가하고, 009는 ReviewRun의 `fingerprint_version`을 도입한다. 기존 FULL_CANON_V1/RELEVANT_CANON_V1 Run은 기본 V1로 조회한다. 신규 RELEVANT_CANON Run은 V2로 저장하며 Skill의 속성 참조와 선택된 Attribute Record를 해시에 포함한다. 과거 V1 해시는 이 Field/확장 경로를 제외해 재구성한다. Skill 사용자 판단과 속성 적합성은 별도 단계이며, 이번 작업은 기존 명시적 사용 문장 판정만 유지한다.
+
 ## Task025 — 관련 Canon 및 불확실성 보존
 
 FULL_CANON 입력을 유지하고 새 ReviewContext는 WorkContext만 받아 순수 분석한다. Generic Canon 외 저장소를 보지 않는다. 이름 중첩은 긴 이름이 차지한 원문 범위만 우선하고 다른 위치의 짧은 이름은 유지한다. 동명 Record는 명시 Set으로 좁혀도 여러 후보이면 AMBIGUOUS다. 관계/계약은 핵심 Character 한 명만 연결되어도 모두 포함하며 1-hop 이후 상대 Character의 참조/관계는 확장하지 않는다.

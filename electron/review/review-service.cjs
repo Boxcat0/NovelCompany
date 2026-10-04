@@ -20,17 +20,22 @@ function buildCanonContextHash(canonContext) {
   return createHash("sha256").update(canonicalStringify(canonContext), "utf8").digest("hex");
 }
 
-/** 전체 건수·시각·원고 위치를 제외하고 선택된 실제 Canon 및 모호한 후보 identity를 결정적으로 해시한다. */
-function buildRelevantCanonHash(context) {
-  const records = context.relevantCanon.selectedRecords.map(record => ({ ...record, fields: [...record.fields].sort((a, b) => a.key.localeCompare(b.key, 'en')).map(field => ({ ...field, value: Array.isArray(field.value) ? [...field.value].sort((a, b) => canonicalStringify(a).localeCompare(canonicalStringify(b), 'en')) : field.value })) }));
+/** V1의 선택·필드 입력을 재현하거나 V2의 필요 속성 참조까지 포함해 결정적으로 해시한다. */
+function buildRelevantCanonHash(context, fingerprintVersion = 'V2') {
+  const oldOnly = fingerprintVersion === 'V1';
+  const oldReasons = context.relevantCanon.selectionReasons.filter(reason => reason.reason !== 'SKILL_REQUIRED_ATTRIBUTE');
+  const oldSelectedIds = new Set(oldReasons.map(reason => reason.recordId));
+  const selected = context.relevantCanon.selectedRecords.filter(record => !oldOnly || oldSelectedIds.has(record.id));
+  const records = selected.map(record => ({ ...record, fields: record.fields.filter(field => !oldOnly || record.setKey !== 'skill' || field.key !== 'required_attribute').sort((a, b) => a.key.localeCompare(b.key, 'en')).map(field => ({ ...field, value: Array.isArray(field.value) ? [...field.value].sort((a, b) => canonicalStringify(a).localeCompare(canonicalStringify(b), 'en')) : field.value })) }));
+  const selectedSets = oldOnly ? context.relevantCanon.selectedSets.filter(set => selected.some(record => record.setKey === set.key)) : context.relevantCanon.selectedSets;
   const ambiguities = context.unresolvedMentions.filter(item => item.status === 'AMBIGUOUS').map(item => ({ raw: item.raw, candidateIds: item.candidateIds }));
-  return buildCanonContextHash({ selectorVersion: context.selectorVersion, selectedSets: context.relevantCanon.selectedSets, records, ambiguities: [...new Map(ambiguities.map(item => [canonicalStringify(item), item])).values()].sort((a, b) => canonicalStringify(a).localeCompare(canonicalStringify(b), 'en')) });
+  return buildCanonContextHash({ selectorVersion: oldOnly ? 'RELEVANT_CANON_V1' : context.selectorVersion, selectedSets, records, ambiguities: [...new Map(ambiguities.map(item => [canonicalStringify(item), item])).values()].sort((a, b) => canonicalStringify(a).localeCompare(canonicalStringify(b), 'en')) });
 }
 
-/** 한 번 읽은 FULL_CANON에서 legacy와 relevant 비교 입력을 함께 구성한다. */
+/** 한 번 읽은 FULL_CANON에서 과거 V1과 신규 V2의 비교 입력을 함께 구성한다. */
 function buildCurrentSource(workContext) {
   const reviewContext = buildReviewContext(workContext);
-  return { episodeContentHash: buildEpisodeContentHash(workContext), canonContextHash: buildRelevantCanonHash(reviewContext), fullCanonContextHash: buildCanonContextHash(workContext.canon), reviewContext };
+  return { episodeContentHash: buildEpisodeContentHash(workContext), canonContextHash: buildRelevantCanonHash(reviewContext), relevantV1ContextHash: buildRelevantCanonHash(reviewContext, 'V1'), fullCanonContextHash: buildCanonContextHash(workContext.canon), reviewContext };
 }
 
 /** metadata hash가 없는 legacy Episode도 저장된 TXT 기반 source hash를 항상 남긴다. */
@@ -51,12 +56,14 @@ function validateReviewResult(result) {
   });
 }
 
-/** 저장 모드에 맞는 hash를 비교하고 원고 변경 시 relevant Canon의 독립 변경 여부는 미확정으로 남긴다. */
+/** 저장 모드·fingerprint 버전으로 비교하고 원고 변경 시 독립 Canon 변경 여부는 미확정으로 남긴다. */
 function toPublicReview(run, currentSource) {
   const episodeChanged = run.episodeContentHash !== currentSource.episodeContentHash;
   const contextMode = run.contextMode ?? 'FULL_CANON_V1';
   const relevant = contextMode === 'RELEVANT_CANON_V1';
-  const contextChanged = run.canonContextHash !== (relevant ? currentSource.canonContextHash : currentSource.fullCanonContextHash ?? currentSource.canonContextHash);
+  const fingerprintVersion = run.fingerprintVersion ?? 'V1';
+  const comparedHash = relevant ? fingerprintVersion === 'V2' ? currentSource.canonContextHash : currentSource.relevantV1ContextHash ?? currentSource.canonContextHash : currentSource.fullCanonContextHash ?? currentSource.canonContextHash;
+  const contextChanged = run.canonContextHash !== comparedHash;
   const canonComparison = relevant && episodeChanged ? 'UNDETERMINED_EPISODE_CHANGED' : 'COMPARABLE';
   const canonChanged = canonComparison === 'COMPARABLE' && contextChanged;
   return {
@@ -65,7 +72,7 @@ function toPublicReview(run, currentSource) {
     episodeId: run.episodeId,
     status: run.status,
     processorKey: run.processorKey,
-    source: { episodeContentHash: run.episodeContentHash, canonContextHash: run.canonContextHash, contextMode },
+    source: { episodeContentHash: run.episodeContentHash, canonContextHash: run.canonContextHash, contextMode, fingerprintVersion },
     freshness: { isCurrent: !episodeChanged && !contextChanged, episodeChanged, canonChanged, contextChanged, canonComparison },
     findings: run.findings.map(({ id, category, message, sortOrder, createdAt }) => ({ id, category, message, sortOrder, createdAt })),
     createdAt: run.createdAt,
@@ -74,11 +81,11 @@ function toPublicReview(run, currentSource) {
   };
 }
 
-/** ReviewContext를 먼저 구성한 뒤 relevant 모드의 RUNNING Run과 Stub 결과 transaction을 실행한다. */
+/** V2 ReviewContext를 먼저 구성한 뒤 버전을 고정한 RUNNING Run과 Stub 결과를 실행한다. */
 async function startEpisodeReview(episodeStorage, input, processor = createStubReviewProcessor()) {
   const workContext = await buildEpisodeWorkContext(episodeStorage, input);
   const source = buildCurrentSource(workContext);
-  const run = repository.createRun({ workId: workContext.work.id, episodeId: workContext.episode.id, processorKey: processor.processorKey, episodeContentHash: source.episodeContentHash, canonContextHash: source.canonContextHash, contextMode: 'RELEVANT_CANON_V1' });
+  const run = repository.createRun({ workId: workContext.work.id, episodeId: workContext.episode.id, processorKey: processor.processorKey, episodeContentHash: source.episodeContentHash, canonContextHash: source.canonContextHash, contextMode: 'RELEVANT_CANON_V1', fingerprintVersion: 'V2' });
   try {
     const findings = validateReviewResult(await processor.review(source.reviewContext));
     return toPublicReview(repository.completeRun(run.id, findings), source);

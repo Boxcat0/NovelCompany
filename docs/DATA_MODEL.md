@@ -1,5 +1,17 @@
 # NovelCompany 데이터 모델 설계
 
+## Task026 — ReviewJob과 Episode 잠금
+
+Migration 010은 `review_jobs(queue_sequence INTEGER PRIMARY KEY AUTOINCREMENT, id UNIQUE, work_id, episode_id, status, episode_content_hash, canon_context_hash, context_mode, fingerprint_version, review_run_id UNIQUE NULL, error_code, error_message, created_at, started_at, completed_at)`를 추가한다. Work/Episode/ReviewRun FK는 모두 ON DELETE RESTRICT다. status는 QUEUED/RUNNING/COMPLETED/FAILED/CANCELLED/RESUBMIT_REQUIRED다. `(episode_id) WHERE status IN ('QUEUED','RUNNING')`과 상수 `(1) WHERE status='RUNNING'`의 partial unique index가 중복 활성 제출과 전역 동시 실행을 막는다. `queue_sequence`는 취소·재제출 후에도 재사용하지 않는다.
+
+QUEUED/RUNNING 존재가 Episode 편집 잠금의 유일한 저장 근거다. ReviewRun은 RUNNING 선점 transaction에서 생성·연결되며 Findings 및 Run/Job 완료는 한 transaction에 쓴다. 001~009 migration과 과거 Run은 변경하지 않는다. 기존 DB의 010 적용 전 `before-task026-<UUID>.db` 백업을 만들며 사용자 데이터는 자동 삭제하지 않는다.
+
+## Task025-HF01 — Skill.required_attribute
+
+Generic Canon의 `skill` Set에 `required_attribute` Field(`필요 속성`, `REFERENCE_ONE`, `COMBOBOX`, `required=1`, `reference_set_id → 같은 CanonSpace의 attribute Set`)를 추가한다. 실제 선택은 `canon_record_references(canon_space_id, canon_set_id, record_id, field_id, target_set_id, target_record_id)` 한 행에 저장된다. 복합 Foreign Key가 같은 CanonSpace/대상 Set을 강제하고 `canon_reference_one_limit`이 한 Skill의 두 번째 Attribute 참조를 거부한다. 기존 Skill의 미설정 상태는 참조 행 없음/null이며 Record나 기존 필드값을 변경하지 않는다.
+
+Migration 008은 이미 올바른 Field가 있는 Set을 건너뛰며 기존 Skill/Attribute Set이 같은 공간에 있는 경우만 Field를 추가한다. Migration 009는 `review_runs.fingerprint_version TEXT NOT NULL DEFAULT 'V1' CHECK (fingerprint_version IN ('V1','V2'))`를 추가한다. 과거 Run은 기본 V1, 신규 Run은 V2다. ReviewContext는 `selectorVersion=RELEVANT_CANON_V2`, Skill의 공개 `required_attribute` Reference 및 선택된 Attribute Record/선택 이유 `SKILL_REQUIRED_ATTRIBUTE`를 포함한다. 기존 V1 hash는 새 Field와 이 선택 경로를 제외한다.
+
 ## Task025 — 파생 ReviewContext V1 및 migration 007
 
 ReviewContext는 DB 엔터티/저장 snapshot이 아니다. scope=RELEVANT_CANON, selectorVersion=RELEVANT_CANON_V1, rangeUnit=UTF16_HALF_OPEN, work, episode, scenes, relevantCanon, abilityOwnershipChecks, unresolvedMentions, warnings로 구성한다. episode는 저장 원문을 한 번 포함한다.

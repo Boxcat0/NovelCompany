@@ -50,7 +50,8 @@ async function exerciseCanonAuthoring(mode = "normal") {
     check(document.getElementById(fieldId("origin_world")).value === "", "Optional world persistence");
     ready("계약", true); ready("관계", true); return { restart: true };
   }
-  for (const name of ["세계", "속성", "패시브", "스킬"]) ready(name, true);
+  for (const name of ["세계", "속성", "패시브"]) ready(name, true);
+  ready('스킬', false);
   for (const name of ["지역", "조직", "캐릭터", "권능", "권속", "계약", "관계"]) ready(name, false);
   await select("character"); check(button("+ 새 항목").disabled, "Blocked character create");
   check(document.querySelector(".canon-readiness").textContent.includes("패시브"), "Missing blocker");
@@ -59,13 +60,27 @@ async function exerciseCanonAuthoring(mode = "normal") {
   await select("world"); await newRecord("임시 UI 세계"); await save("임시 UI 세계"); ready("지역", true);
   await select("location"); await newRecord("임시 UI 지역"); await reference("world", "임시 UI 세계"); await save("임시 UI 지역"); ready("조직", true);
   await select("attribute"); await newRecord("임시 UI 속성"); await save("임시 UI 속성"); ready("캐릭터", false);
+  ready('스킬', true);
+  await select('skill');
+  const legacySkill = [...document.querySelectorAll('.canon-record-list button')].find(item => item.textContent.includes('기존 미설정 스킬'));
+  check(legacySkill?.textContent.includes('필요 속성 미설정'), 'Legacy skill must be labeled missing');
+  legacySkill.click();
+  await waitFor(() => document.getElementById('canon-record-name')?.value === '기존 미설정 스킬', 'Legacy skill form');
+  check(document.getElementById(fieldId('required_attribute')).value === '', 'Legacy field must remain unassigned');
+  await fill(fieldId('description'), '기존 미설정 설명 보완');
+  click('저장');
+  await waitFor(() => document.body.textContent.includes('저장되었습니다.') && !button('저장').disabled, 'Legacy edit without attribute');
+  check([...document.querySelectorAll('.canon-record-list button')].some(item => item.textContent.includes('기존 미설정 스킬 · 필요 속성 미설정')), 'Legacy status stays missing');
+  await reference('required_attribute', '임시 UI 속성');
+  await save('기존 미설정 스킬');
+  check(![...document.querySelectorAll('.canon-record-list button')].some(item => item.textContent.includes('기존 미설정 스킬 · 필요 속성 미설정')), 'Legacy skill becomes configured');
   await select("passive"); await newRecord("임시 UI 공용"); await reference("passive_type", "공통"); await save("임시 UI 공용"); ready("캐릭터", true);
   await newRecord("임시 UI 고유"); await reference("passive_type", "고유"); await save("임시 UI 고유");
   await select("character"); await newRecord("이카로스");
   for (const key of ["origin_location", "attributes", "passives"]) check(document.querySelector("label[for='" + fieldId(key) + "']").textContent.includes("필수"), key + " required label");
   for (const key of ["origin_world", "current_location", "organization", "skills"]) check(document.querySelector("label[for='" + fieldId(key) + "']").textContent.includes("선택"), key + " optional label");
   click("저장"); await waitFor(() => document.querySelector("[role=alert]")?.textContent.includes("출신 지역"), "missing field validation");
-  window.confirm = () => false; click("스킬 입력으로 이동"); setButton("세계").click(); click("← 작품 선택"); click("작품 관리"); click("+ 새 항목"); click("Canon 전체 삭제");
+  window.confirm = () => false; setButton("스킬").click(); setButton("세계").click(); click("← 작품 선택"); click("작품 관리"); click("+ 새 항목"); click("Canon 전체 삭제");
   check(document.getElementById("canon-record-name").value === "이카로스", "Dirty cancel");
   window.confirm = () => true;
   await reference("origin_location", "임시 UI 지역"); await choose("attributes", "임시 UI 속성"); await choose("passives", "임시 UI 고유"); await save("이카로스");
@@ -89,7 +104,10 @@ async function exerciseCanonAuthoring(mode = "normal") {
   document.querySelector(".canon-definition summary").click(); check(document.querySelector(".canon-definition").open, "Structure view");
   await select("attribute"); click("임시 UI 속성"); await waitFor(() => button("삭제") && !button("삭제").disabled, "attribute selected"); click("삭제");
   await waitFor(() => document.querySelector("[role=alert]")?.textContent.includes("사용 중"), "Referenced delete blocked");
-  await select("skill"); await newRecord("임시 UI 삭제 스킬"); await save("임시 UI 삭제 스킬"); click("삭제"); await waitFor(() => !button("임시 UI 삭제 스킬") && !document.getElementById("canon-record-name") && !document.querySelector(".back-button").disabled, "unused delete");
+  await select("skill"); await newRecord("임시 UI 삭제 스킬");
+  check(document.querySelector("label[for='" + fieldId('required_attribute') + "']").textContent.includes('필수'), 'Required attribute label');
+  click('저장'); await waitFor(() => document.querySelector('[role=alert]')?.textContent.includes('필요 속성'), 'Required attribute client validation');
+  await reference('required_attribute', '임시 UI 속성'); await save("임시 UI 삭제 스킬"); click("삭제"); await waitFor(() => !button("임시 UI 삭제 스킬") && !document.getElementById("canon-record-name") && !document.querySelector(".back-button").disabled, "unused delete");
   await select("character"); click("이카로스"); await waitFor(() => document.getElementById("canon-record-name")?.value === "이카로스" && button("저장")?.disabled === false, "final form");
   return { checks: "grouping/dependency progression/minimum/optional/UNIQUE/CRUD/dirty/security" };
 }

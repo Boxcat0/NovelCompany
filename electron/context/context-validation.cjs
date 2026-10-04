@@ -170,6 +170,7 @@ async function runValidation() {
     const skill = records.create(
       scope.skill,
       inputFor(scope.skill, "검증 스킬", {
+        required_attribute: attribute.id,
         context_text: "문자열",
         context_number: 7,
         context_boolean: false,

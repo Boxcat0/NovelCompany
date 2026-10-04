@@ -139,13 +139,17 @@ function buildReviewContext(workContext) {
         for (const ref of refs.filter(ref => ref.recordId !== character.id)) reasons.push({ recordId: ref.recordId, reason: 'RELATED_PARTICIPANT', sceneIndex: scene.index, sourceRecordId: record.id, range: null });
       }
     }
+    // 선택된 Skill만 한 단계 따라가며 필요 속성을 포함한다. Attribute에서 다시 확장하지 않는다.
+    for (const skill of scene.selectedCanonIds.map(id => byId.get(id)).filter(record => record.setKey === 'skill')) {
+      for (const ref of references(skill, ['required_attribute'])) select(ref.recordId, 'SKILL_REQUIRED_ATTRIBUTE', scene, skill.id);
+    }
     for (const match of content.slice(start, end).matchAll(/그분|그 녀석|그녀석|그 사람/g)) unresolvedMentions.push({ raw: match[0], sceneIndex: scene.index, range: { start: start + match.index, end: start + match.index + match[0].length }, status: 'UNKNOWN', candidateIds: [] });
     scene.selectedCanonIds.sort();
   }
   const selectedRecords = [...selected.values()].sort((a, b) => a.id.localeCompare(b.id, 'en'));
   const selectedSets = workContext.canon.sets.filter(set => selectedRecords.some(record => record.setKey === set.key)).map(set => ({ key: set.key, label: set.label })).sort((a, b) => a.key.localeCompare(b.key, 'en'));
   const warnings = [...parsed.warnings, ...scenes.flatMap(scene => scene.notationOccurrences.filter(item => item.resolution && item.resolution.status !== 'MATCHED').map(item => ({ range: item.range, message: item.resolution.status === 'AMBIGUOUS' ? '능력 표기에 여러 Canon 후보가 있습니다.' : item.type === 'AUTHORITY' ? '권능 표기와 Canon을 연결할 확정 규칙이 없습니다.' : '능력 표기와 일치하는 Canon이 없습니다.' }))), ...scenes.filter(scene => scene.locationHeading && scene.resolvedLocation.status !== 'MATCHED').map(scene => ({ range: scene.originalRange, message: '장소 Canon 연결이 미등록 또는 모호한 상태입니다.' }))];
-  return { scope: 'RELEVANT_CANON', selectorVersion: 'RELEVANT_CANON_V1', rangeUnit: 'UTF16_HALF_OPEN', work: { ...workContext.work }, episode: { ...workContext.episode }, scenes, relevantCanon: { selectedSets, selectedRecords, selectionReasons: reasons }, abilityOwnershipChecks: checks, unresolvedMentions, warnings };
+  return { scope: 'RELEVANT_CANON', selectorVersion: 'RELEVANT_CANON_V2', rangeUnit: 'UTF16_HALF_OPEN', work: { ...workContext.work }, episode: { ...workContext.episode }, scenes, relevantCanon: { selectedSets, selectedRecords, selectionReasons: reasons }, abilityOwnershipChecks: checks, unresolvedMentions, warnings };
 }
 
 /** Preview와 Review 실행이 같은 WorkContext 출발점과 순수 분석 함수를 사용하게 한다. */

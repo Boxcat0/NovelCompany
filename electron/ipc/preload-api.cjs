@@ -77,8 +77,15 @@ function createNovelCompanyApi(ipcRenderer) {
         ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_GET_EPISODE_WORK_CONTEXT, input),
     },
     reviews: {
-      /** 검토 lifecycle 시작 요청을 고정 channel로 전달한다. */
-      start: (input) => ipcRenderer.invoke(IPC_CHANNELS.REVIEW_START, input),
+      /** 이전 시작 API도 제출 경로로 위임해 FIFO를 우회하지 못하게 한다. */
+      start: (input) => ipcRenderer.invoke(IPC_CHANNELS.REVIEW_SUBMIT, input),
+      /** 저장된 회차를 검토 대기열에 접수한다. */
+      submit: (input) => ipcRenderer.invoke(IPC_CHANNELS.REVIEW_SUBMIT, input),
+      /** 전체 대기열과 선택 회차의 최신 Job을 읽는다. */
+      getQueue: () => ipcRenderer.invoke(IPC_CHANNELS.REVIEW_GET_QUEUE),
+      getJobByEpisode: (input) => ipcRenderer.invoke(IPC_CHANNELS.REVIEW_GET_JOB_BY_EPISODE, input),
+      /** 대기 중인 제출만 철회한다. */
+      cancelQueued: (id) => ipcRenderer.invoke(IPC_CHANNELS.REVIEW_CANCEL_QUEUED, id),
       /** 현재 source freshness를 포함한 Episode history 요청을 전달한다. */
       getByEpisode: (input) => ipcRenderer.invoke(IPC_CHANNELS.REVIEW_GET_BY_EPISODE, input),
       /** 지정 ReviewRun 단건 요청을 전달한다. */

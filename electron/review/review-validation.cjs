@@ -111,7 +111,7 @@ async function runValidation() {
     const location = records.create(scope.location, inputFor(scope.location, '헤븐즈', { world: relevantWorld.id }));
     const attribute = records.create(scope.attribute, inputFor(scope.attribute, '검증 속성'));
     const passive = records.create(scope.passive, inputFor(scope.passive, '공통 패시브', { passive_type: optionId(scope.passive, 'passive_type', 'COMMON') }));
-    const skill = records.create(scope.skill, inputFor(scope.skill, '버티컬 슬래쉬'));
+    const skill = records.create(scope.skill, inputFor(scope.skill, '버티컬 슬래쉬', { required_attribute: attribute.id }));
     const characterValues = { origin_location: location.id, attributes: [attribute.id], passives: [passive.id], skills: [skill.id] };
     const actor = records.create(scope.character, inputFor(scope.character, '한지수', characterValues));
     const partner = records.create(scope.character, inputFor(scope.character, '이카로스', characterValues));

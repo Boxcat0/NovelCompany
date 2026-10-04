@@ -28,6 +28,10 @@ const IPC_CHANNELS = Object.freeze({
   CONTEXT_GET_EPISODE_WORK_CONTEXT: "context:get-episode-work-context",
   CONTEXT_GET_EPISODE_REVIEW_CONTEXT: "context:get-episode-review-context",
   REVIEW_START: "reviews:start",
+  REVIEW_SUBMIT: "reviews:submit",
+  REVIEW_GET_QUEUE: "reviews:get-queue",
+  REVIEW_GET_JOB_BY_EPISODE: "reviews:get-job-by-episode",
+  REVIEW_CANCEL_QUEUED: "reviews:cancel-queued",
   REVIEW_GET_BY_EPISODE: "reviews:get-by-episode",
   REVIEW_GET_BY_ID: "reviews:get-by-id",
 });

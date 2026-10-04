@@ -22,6 +22,7 @@ function toRun(row) {
     episodeContentHash: row.episode_content_hash,
     canonContextHash: row.canon_context_hash,
     contextMode: row.context_mode,
+    fingerprintVersion: row.fingerprint_version,
     errorCode: row.error_code,
     createdAt: row.created_at,
     startedAt: row.started_at,
@@ -71,7 +72,9 @@ function createRun(input) {
   const database = getDatabase();
   const episode = database.prepare("SELECT work_id FROM episodes WHERE id = ?").get(episodeId);
   const contextMode = input.contextMode ?? 'FULL_CANON_V1';
+  const fingerprintVersion = input.fingerprintVersion ?? 'V1';
   if (!['FULL_CANON_V1', 'RELEVANT_CANON_V1'].includes(contextMode)) throw new RepositoryError('REVIEW_START_FAILED', '검토 컨텍스트 모드가 올바르지 않습니다.');
+  if (!['V1', 'V2'].includes(fingerprintVersion) || (fingerprintVersion === 'V2' && contextMode !== 'RELEVANT_CANON_V1')) throw new RepositoryError('REVIEW_START_FAILED', '검토 fingerprint 버전이 올바르지 않습니다.');
   if (!episode || episode.work_id !== workId) throw new RepositoryError("EPISODE_NOT_FOUND", "에피소드를 찾을 수 없습니다.");
   if (database.prepare("SELECT 1 FROM review_runs WHERE episode_id = ? AND status = 'RUNNING' LIMIT 1").get(episodeId)) {
     throw new RepositoryError("REVIEW_ALREADY_RUNNING", "이미 이 에피소드의 검토가 진행 중입니다.");
@@ -79,7 +82,7 @@ function createRun(input) {
   const id = randomUUID();
   const now = new Date().toISOString();
   try {
-    database.prepare("INSERT INTO review_runs (id, work_id, episode_id, status, processor_key, episode_content_hash, canon_context_hash, context_mode, error_code, created_at, started_at, completed_at) VALUES (?, ?, ?, 'RUNNING', ?, ?, ?, ?, NULL, ?, ?, NULL)").run(id, workId, episodeId, processorKey, episodeContentHash, canonContextHash, contextMode, now, now);
+    database.prepare("INSERT INTO review_runs (id, work_id, episode_id, status, processor_key, episode_content_hash, canon_context_hash, context_mode, fingerprint_version, error_code, created_at, started_at, completed_at) VALUES (?, ?, ?, 'RUNNING', ?, ?, ?, ?, ?, NULL, ?, ?, NULL)").run(id, workId, episodeId, processorKey, episodeContentHash, canonContextHash, contextMode, fingerprintVersion, now, now);
   } catch (cause) {
     if (String(cause?.message).includes("idx_review_runs_episode_running")) throw new RepositoryError("REVIEW_ALREADY_RUNNING", "이미 이 에피소드의 검토가 진행 중입니다.", cause);
     throw new RepositoryError("REVIEW_START_FAILED", "검토 작업을 시작하지 못했습니다.", cause);

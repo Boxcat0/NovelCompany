@@ -1,5 +1,21 @@
 # NovelCompany 개발 계획
 
+## Task026 — Review Submission & Persistent FIFO Queue
+
+- ReviewJob 영속 접수, 순번 기반 FIFO, 전역 단일 RUNNING, ReviewRun 원자적 연결·종료.
+- QUEUED/RUNNING Episode의 TXT·metadata 수정 잠금, QUEUED 철회·재제출, 저장·제출 경합 방지.
+- 제출 V2 fingerprint 재확인, 변경 시 RESUBMIT_REQUIRED, 재시작 중단 작업 실패 복구와 대기열 재개.
+- WorksScreen의 제출·상태·대기열, 격리 DB/IPC/Electron UI 회귀 검증.
+- 실제 AI Reviewer, 비용 처리, 재시도 정책과 외부 편집기의 OS 파일 잠금은 후속 범위.
+
+## Task025-HF01 — Skill Canon Required Attribute
+
+- Generic Skill의 단일 필수 Attribute 참조, 기존 미설정 Skill 보호 및 보완 UI.
+- 008 Definition 확장과 009 Review fingerprint 버전, 기존 DB 대상 확인·백업·재검증.
+- ReviewContext V2에 선택 Skill의 필요 속성 포함. 관련 변경만 신규 Review freshness에 반영.
+- 격리 DB와 Electron UI에서 생성/수정/교차 작품 차단·기존 이력 호환 검증.
+- Scene 전체 문맥으로 Skill 사용자를 추론하고 Character.attributes 적합성을 판정하는 작업은 후속 AI Reviewer 범위다.
+
 ## Task025 — Scene-aware Relevant Canon Selector + ReviewContext V1
 
 - 원고 기호 및 Scene parser, UTF-16 원문 범위와 경고 보존.

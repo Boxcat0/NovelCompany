@@ -21,7 +21,8 @@ async function validateCanonAuthoring(api = repository) {
     assert.deepEqual(ready.blockers.map((b) => Object.keys(scopes).find((k) => scopes[k].setId === b.targetSetId)).sort(), [...expected].sort());
     return ready;
   }
-  for (const key of ["world", "attribute", "passive", "skill"]) await blocked(key, []);
+  for (const key of ["world", "attribute", "passive"]) await blocked(key, []);
+  await blocked('skill', ['attribute']);
   await blocked("location", ["world"]); await blocked("organization", ["location"]);
   await blocked("character", ["location", "attribute", "passive"]);
   // 과거 optional flag가 required여도 Character 시작 조건에 포함되지 않는다.
@@ -96,6 +97,7 @@ function validateAuthoringMigration(root) {
   const passiveType = definitions.getCanonDefinitionBySetId(scope.passive.setId).fields.find((field) => field.key === "passive_type");
   const passive = repository.create(scope.passive, inputFor(scope.passive, "임시 보존 패시브", { passive_type: passiveType.options.find((option) => option.value === "COMMON").id }));
   const character = repository.create(scope.character, inputFor(scope.character, "이카로스", { origin_world: saved.id, origin_location: location.id, current_location: location.id, attributes: [attribute.id], passives: [passive.id], description: "임시 migration 보존 검증" }));
+  db.exec("DELETE FROM canon_fields WHERE key = 'required_attribute'");
   const valueTables = ["canon_records", "canon_field_values", "canon_record_option_values", "canon_record_references"];
   const recordsBefore = valueTables.map((table) => db.prepare("SELECT * FROM " + table + " ORDER BY rowid").all());
   db.exec("UPDATE canon_fields SET required = 1 WHERE key IN ('origin_world', 'current_location'); UPDATE canon_fields SET required = 0 WHERE key = 'relationship_type'; DELETE FROM schema_migrations WHERE version = 5");
@@ -104,16 +106,17 @@ function validateAuthoringMigration(root) {
   closeDatabase();
   const migrated = initializeDatabase(file);
   const after = migrated.prepare("SELECT * FROM canon_fields ORDER BY id").all();
-  assert.deepEqual(after.map(({ required, ...rest }) => rest), before.map(({ required, ...rest }) => rest));
-  assert.equal(after.filter((row, i) => row.required !== before[i].required).length, 3);
-  assert.deepEqual(after.filter((row) => row.canon_space_id === custom.world.canonSpaceId), before.filter((row) => row.canon_space_id === custom.world.canonSpaceId));
+  const priorFields = new Map(before.map(row => [row.id, row]));
+  assert.deepEqual(after.filter(row => priorFields.has(row.id)).map(({ required, ...rest }) => rest), before.map(({ required, ...rest }) => rest));
+  assert.equal(after.filter(row => priorFields.has(row.id) && row.required !== priorFields.get(row.id).required).length, 3);
+  assert.deepEqual(after.filter((row) => row.canon_space_id === custom.world.canonSpaceId && priorFields.has(row.id)), before.filter((row) => row.canon_space_id === custom.world.canonSpaceId));
   assert.deepEqual(repository.getById(scope.world, saved.id), saved);
   assert.deepEqual(repository.getById(scope.character, character.id), character);
   assert.deepEqual(valueTables.map((table) => migrated.prepare("SELECT * FROM " + table + " ORDER BY rowid").all()), recordsBefore);
-  assert.equal(migrated.prepare("SELECT COUNT(*) n FROM schema_migrations").get().n, 7);
+  assert.equal(migrated.prepare("SELECT COUNT(*) n FROM schema_migrations").get().n, 10);
   const backups = fs.readdirSync(path.join(path.dirname(file), "backups")); assert.equal(backups.length, 1);
   const backup = new DatabaseSync(path.join(path.dirname(file), "backups", backups[0]), { readOnly: true });
-  try { assert.equal(backup.prepare("SELECT COUNT(*) n FROM schema_migrations").get().n, 6); assert.equal(backup.prepare("SELECT required FROM canon_fields WHERE canon_set_id = ? AND key = 'origin_world'").get(scope.character.setId).required, 1); } finally { backup.close(); }
+  try { assert.equal(backup.prepare("SELECT COUNT(*) n FROM schema_migrations").get().n, 9); assert.equal(backup.prepare("SELECT required FROM canon_fields WHERE canon_set_id = ? AND key = 'origin_world'").get(scope.character.setId).required, 1); } finally { backup.close(); }
   closeDatabase(); initializeDatabase(file); closeDatabase();
   assert.equal(fs.readdirSync(path.join(path.dirname(file), "backups")).length, 1);
   const failFile = path.join(root, "task022-backup-failure", "novelcompany.db");

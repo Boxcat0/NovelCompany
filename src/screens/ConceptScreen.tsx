@@ -232,10 +232,17 @@ function ConceptScreen({ onNavigationState }: { onNavigationState?: (dirty: bool
     setRecordId(record.id); setInput(nextInput); setBaseline(JSON.stringify(nextInput));
   }
 
+  /** 기존 Skill의 저장 전 미설정 여부를 기준으로 신규/기존 필수 정책을 구분한다. */
+  function legacySkillMissing() {
+    if (!recordId || definition?.key !== 'skill' || !baseline) return false;
+    const field = definition.fields.find(item => item.key === 'required_attribute');
+    return Boolean(field && JSON.parse(baseline).fieldValues[field.id] === null);
+  }
+
   /** 저장 입력을 검증하고 생성/수정 후 목록, 선택, 참조 및 선행조건을 갱신한다. */
   async function handleSave() {
     if (busy || !input || !scope || !definition) return;
-    const validation = validateCanonForm(definition, input);
+    const validation = validateCanonForm(definition, input, legacySkillMissing());
     if (validation) { setError(validation); return; }
     await runAction(async () => {
       const saved = unwrap(recordId ? await window.novelCompany.canon.records.update(scope, recordId, input) : await window.novelCompany.canon.records.create(scope, input));
@@ -279,12 +286,12 @@ function ConceptScreen({ onNavigationState }: { onNavigationState?: (dirty: bool
           {definition ? <><h2>{definition.name}</h2><button disabled={busy || !readiness[definition.id]?.canCreate} onClick={() => void handleOpenRecord(null)}>+ 새 항목</button>
             {readiness[definition.id]?.blockers.length > 0 && <div className="canon-readiness" role="status"><p>{definition.name} 등록에 필요한 선행 설정입니다.</p><ul>{readiness[definition.id].blockers.map((blocker) => <li key={blocker.targetSetId}>{blocker.targetSetName}: {blocker.currentCount} / 최소 {blocker.requiredCount}개 <button disabled={busy} onClick={() => handleNavigateDependency(blocker.targetSetId)}>{blocker.targetSetName} 입력으로 이동</button></li>)}</ul></div>}
             {records.length === 0 && <p>등록된 항목이 없습니다.</p>}
-            {records.map((record) => <button className={"concept-set-button" + (record.id === recordId ? " is-selected" : "")} key={record.id} disabled={busy} onClick={() => void handleOpenRecord(record.id)}>{record.displayName}</button>)}
+            {records.map((record) => <button className={"concept-set-button" + (record.id === recordId ? " is-selected" : "")} key={record.id} disabled={busy} onClick={() => void handleOpenRecord(record.id)}>{record.displayName}{record.requiredAttributeMissing && ' · 필요 속성 미설정'}</button>)}
           </> : <p>왼쪽에서 설정 분류를 선택하세요.</p>}
         </div>
         <div>
           {definition && <details className="canon-definition"><summary>구조 보기</summary><p>{definition.recordNameLabel}</p>{definition.fields.map((field) => <dl key={field.id}><dt>{field.label}{field.required ? " (필수)" : " (선택)"}</dt><dd>{field.valueType} · {field.inputControl}{field.referenceSet ? " · " + field.referenceSet.name + " 참조" : ""}{field.options.length ? " · " + field.options.map((option) => option.label).join(", ") : ""}</dd></dl>)}</details>}
-          {definition && input ? <DynamicCanonForm definition={definition} input={input} options={options} busy={busy} editing={recordId !== null} dirty={dirty} onChange={setInput} onSave={() => void handleSave()} onDelete={() => void handleDelete()} onNavigateReference={handleNavigateDependency} /> : definition && <p>항목을 선택하거나 새 항목을 등록하세요.</p>}
+          {definition && input ? <DynamicCanonForm definition={definition} input={input} options={options} busy={busy} editing={recordId !== null} dirty={dirty} allowLegacySkillMissing={legacySkillMissing()} onChange={setInput} onSave={() => void handleSave()} onDelete={() => void handleDelete()} onNavigateReference={handleNavigateDependency} /> : definition && <p>항목을 선택하거나 새 항목을 등록하세요.</p>}
         </div>
       </div>}
       {spaceLoaded && canonSpace && <section className="canon-danger-zone" aria-label="Canon 전체 삭제 관리">

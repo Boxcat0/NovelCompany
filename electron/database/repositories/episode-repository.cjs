@@ -1,6 +1,8 @@
 const crypto = require("node:crypto");
 const { getDatabase } = require("../database.cjs");
 const { RepositoryError } = require("./repository-error.cjs");
+const { assertEpisodeUnlocked } = require('./review-job-repository.cjs');
+const { assertEpisodeOperationAvailable } = require('../../review/episode-operation-gate.cjs');
 
 const episodeStatuses = new Set(["DRAFT", "IN_PROGRESS", "COMPLETED"]);
 
@@ -212,6 +214,8 @@ function updateEpisode(id, changes) {
   if (!currentEpisode) {
     return null;
   }
+  assertEpisodeOperationAvailable(episodeId);
+  assertEpisodeUnlocked(episodeId);
 
   if (!changes || typeof changes !== "object") {
     throw new RepositoryError(
@@ -288,6 +292,8 @@ function getEpisodeForWork(workId, episodeId) {
 /** 소속을 검증한 Episode metadata 한 행만 삭제하며 파일 작업은 orchestration에 맡긴다. */
 function deleteEpisode(workId, episodeId) {
   getEpisodeForWork(workId, episodeId);
+  assertEpisodeOperationAvailable(episodeId);
+  assertEpisodeUnlocked(episodeId);
   getDatabase().prepare("DELETE FROM episodes WHERE id = ? AND work_id = ?").run(episodeId, workId);
   return { id: episodeId, workId };
 }

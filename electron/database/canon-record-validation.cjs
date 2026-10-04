@@ -54,7 +54,8 @@ function snapshot() {
 function validateCanonRecords() {
   const db = getDatabase();
   const scope = createCanonFixture();
-  for (const key of ["world", "attribute", "skill", "passive"]) assert.equal(records.getCreateReadiness(scope[key]).canCreate, true);
+  for (const key of ["world", "attribute", "passive"]) assert.equal(records.getCreateReadiness(scope[key]).canCreate, true);
+  assert.equal(records.getCreateReadiness(scope.skill).canCreate, false);
   for (const key of ["location", "organization", "character", "authority", "servant", "contract", "relationship"]) assert.equal(records.getCreateReadiness(scope[key]).canCreate, false);
   assert.equal(records.getBySetId(scope.world).length, 0);
   expectCode(() => records.create(scope.character, inputFor(scope.character, "한지수")), "CANON_CREATE_PREREQUISITE_MISSING");
@@ -65,6 +66,7 @@ function validateCanonRecords() {
   const common = records.create(scope.passive, inputFor(scope.passive, "검증 공용", { passive_type: optionId(scope.passive, "passive_type", "COMMON") }));
   expectCode(() => records.create(scope.character, inputFor(scope.character, "한지수")), "CANON_CREATE_PREREQUISITE_MISSING");
   const attribute = records.create(scope.attribute, inputFor(scope.attribute, "검증 속성"));
+  assert.equal(records.getCreateReadiness(scope.skill).canCreate, true);
   records.delete(scope.passive, common.id);
   expectCode(() => records.create(scope.character, inputFor(scope.character, "한지수")), "CANON_CREATE_PREREQUISITE_MISSING");
   const common2 = records.create(scope.passive, inputFor(scope.passive, "검증 공용", { passive_type: optionId(scope.passive, "passive_type", "COMMON") }));
@@ -119,7 +121,7 @@ function validateCanonRecords() {
   assert.equal(records.getBySetId(scope.character).length, 0);
   records.delete(scope.passive, unique.id);
   expectCode(() => records.getById(scope.passive, unique.id), "CANON_RECORD_NOT_FOUND");
-  validateGenericTypes(scope.skill);
+  validateGenericTypes(scope.attribute);
   assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
   console.log("Task017 Canon CRUD, readiness, scope, ownership and rollback validation passed.");
 }

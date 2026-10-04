@@ -48,6 +48,25 @@ async function exerciseEpisodes(mode = "normal") {
       return { staleReadIgnored: true };
     }
     await waitFor(() => document.getElementById("episode-content"), "loaded manuscript");
+    if (mode === 'queue-ui') {
+      await waitFor(() => document.querySelector('[aria-label="검토"]')?.textContent.includes('제출 상태: 대기 중'), 'Queued Job visible');
+      check(document.querySelector('.episode-editor fieldset').disabled, 'Queued Episode editor remained enabled');
+      check(button('검토부에 제출')?.disabled && !button('제출 철회')?.disabled, 'Queued buttons invalid');
+      check(document.querySelector('[aria-label="검토"]')?.textContent.includes('대기 순서 1'), 'Queue position missing');
+      const work = (await window.novelCompany.works.getAll()).data.find(item => item.title === '회차 UI 작품');
+      const selected = (await window.novelCompany.episodes.getByWorkId(work.id)).data.find(item => item.episodeNumber === 1);
+      const blocked = await window.novelCompany.episodes.update(selected.id, { workId: work.id, episodeNumber: 1, title: 'IPC 우회 수정', content: 'IPC 우회' });
+      check(!blocked.ok && blocked.error.code === 'EPISODE_REVIEW_LOCKED', 'Queued IPC update escaped lock');
+      episode(4).click();
+      await waitFor(() => document.getElementById('episode-number')?.value === '4', 'Other Episode switch');
+      check(!document.querySelector('.episode-editor fieldset').disabled, 'Other Episode was locked');
+      check(!document.querySelector('[aria-label="검토"]')?.textContent.includes('제출 상태: 대기 중'), 'Old Job leaked into new Episode');
+      episode(1).click();
+      await waitFor(() => document.querySelector('[aria-label="검토"]')?.textContent.includes('제출 상태: 대기 중'), 'Queued Job restored');
+      click('제출 철회');
+      await waitFor(() => document.querySelector('[aria-label="검토"]')?.textContent.includes('제출 상태: 철회됨') && !document.querySelector('.episode-editor fieldset').disabled, 'Cancel unlock');
+      return { queuedEditorBlocked: true, cancelUnlocked: true, staleJobIgnored: true };
+    }
     if (mode === 'context-race') {
       click('작업 컨텍스트 확인');
       await waitFor(() => document.body.textContent.includes('작업 컨텍스트를 구성하는 중입니다.'), 'Context pending');
@@ -79,9 +98,7 @@ async function exerciseEpisodes(mode = "normal") {
   await create(3);
   episode(2).click(); await waitFor(() => document.getElementById("episode-number")?.value === "2", "select 2");
   await fill("episode-content", '[헤븐즈]\n나는 {미등록 능력}을 사용했다. 그분\n[알림 : 내용]');
-  await waitFor(() => button("검토 시작") && !button("검토 시작").disabled, "review ready");
-  click("검토 시작");
-  await waitFor(() => document.body.textContent.includes("저장되지 않은 원고가 있습니다. 검토를 시작하려면 먼저 저장해 주세요."), "dirty review block");
+  await waitFor(() => button("검토부에 제출")?.disabled && document.body.textContent.includes('미저장 변경사항을 저장한 뒤 제출'), "dirty review block");
   click("작업 컨텍스트 확인");
   await waitFor(() => document.body.textContent.includes("저장되지 않은 원고가 있습니다."), "dirty context block");
   await save();
@@ -98,9 +115,12 @@ async function exerciseEpisodes(mode = "normal") {
   episode(1).click();
   await waitFor(() => document.getElementById('episode-number')?.value === '1', 'Preview switch');
   check(!document.querySelector('[aria-label="검토 컨텍스트 미리보기"]'), 'Previous Episode preview must be cleared');
+  check(!document.querySelector('[aria-label="검토"]')?.textContent.includes('제출 상태:'), 'Previous Episode Job must be cleared');
   episode(2).click();
-  await waitFor(() => document.getElementById('episode-number')?.value === '2' && !button('검토 시작').disabled, 'Return for review');
-  click("검토 시작");
+  await waitFor(() => document.getElementById('episode-number')?.value === '2' && !button('검토부에 제출').disabled, 'Return for review');
+  click("검토부에 제출");
+  await waitFor(() => document.querySelector('[aria-label="검토"]')?.textContent.includes('제출 상태: 완료'), 'Job completion');
+  check(document.querySelector('[aria-label="검토부 대기열"]'), 'Queue panel missing');
   await waitFor(() => document.body.textContent.includes("Stub 검토 완료: 실제 AI 검토 결과가 아닙니다."), "stub review result");
   check(!document.body.textContent.includes("문제 없음"), "Stub must not claim no issues");
   await fill("episode-number", "7"); await fill("episode-status", "COMPLETED"); await fill("episode-content", "번호 변경 원고"); await save();

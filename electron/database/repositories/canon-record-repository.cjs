@@ -29,10 +29,14 @@ function mapRecord(row) {
   return { id: row.id, canonSpaceId: row.canon_space_id, setId: row.canon_set_id, displayName: row.display_name, createdAt: row.created_at, updatedAt: row.updated_at };
 }
 
-/** 검증한 공간과 Set 안의 실제 레코드를 이름순으로 조회한다. */
+/** 검증한 공간과 Set 안의 레코드를 조회하고 기존 Skill의 속성 미설정 상태를 함께 제공한다. */
 function getBySetId(scope) {
-  requireDefinition(scope);
-  return getDatabase().prepare("SELECT * FROM canon_records WHERE canon_space_id = ? AND canon_set_id = ? ORDER BY display_name, id").all(scope.canonSpaceId, scope.setId).map(mapRecord);
+  const definition = requireDefinition(scope);
+  const rows = getDatabase().prepare("SELECT * FROM canon_records WHERE canon_space_id = ? AND canon_set_id = ? ORDER BY display_name, id").all(scope.canonSpaceId, scope.setId);
+  if (definition.key !== 'skill') return rows.map(mapRecord);
+  const requiredField = definition.fields.find(field => field.key === 'required_attribute');
+  const assigned = requiredField ? new Set(getDatabase().prepare("SELECT record_id FROM canon_record_references WHERE canon_space_id = ? AND field_id = ?").all(scope.canonSpaceId, requiredField.id).map(row => row.record_id)) : new Set();
+  return rows.map(row => ({ ...mapRecord(row), requiredAttributeMissing: !assigned.has(row.id) }));
 }
 
 /** 레코드의 소속을 확인하고 scalar/option/reference 값을 Field ID별로 복원한다. */
@@ -99,8 +103,8 @@ function getReferenceOptions(scope, fieldId, editingRecordId = null) {
   });
 }
 
-/** Character 최소 선택과 scalar/option/reference 타입, 필수 입력 및 실제 대상 소속을 검증한다. */
-function validateInput(definition, input) {
+/** Character 최소 선택과 Skill 기존 미설정 예외를 포함해 필수값·참조 소속을 검증한다. */
+function validateInput(definition, input, allowLegacySkillMissing = false) {
   check(input && typeof input === "object" && typeof input.displayName === "string" && input.displayName.trim(), "CANON_REQUIRED_FIELD_MISSING", "이름을 입력해 주세요.");
   check(input.fieldValues && typeof input.fieldValues === "object" && !Array.isArray(input.fieldValues), "CANON_FIELD_VALUE_INVALID", "설정 항목의 입력값이 올바르지 않습니다.");
   const fields = new Map(definition.fields.map((field) => [field.id, field]));
@@ -109,7 +113,8 @@ function validateInput(definition, input) {
   for (const field of definition.fields) {
     const value = input.fieldValues[field.id];
     const missing = value === null || value === undefined || value === "" || (Array.isArray(value) && value.length === 0);
-    check(!field.required || !missing, "CANON_REQUIRED_FIELD_MISSING", "'" + field.label + "' 항목을 입력하거나 하나 이상 선택해 주세요.");
+    const legacySkillMissing = allowLegacySkillMissing && definition.key === 'skill' && field.key === 'required_attribute';
+    check(!field.required || !missing || legacySkillMissing, "CANON_REQUIRED_FIELD_MISSING", "'" + field.label + "' 항목을 입력하거나 하나 이상 선택해 주세요.");
     if (missing && !Array.isArray(value) && value !== "") continue;
     const type = field.valueType;
     let valid = false;
@@ -215,13 +220,19 @@ function withTransaction(action, code, message) {
   }
 }
 
-/** 생성/수정을 한 transaction으로 수행하고 최종 의미 검증이 통과한 레코드를 반환한다. */
+/** 생성/수정을 한 transaction으로 수행하며 업그레이드 전 Skill 미설정 상태만 수정 시 보존한다. */
 function saveRecord(scope, input, recordId = null) {
   return withTransaction(() => {
     const definition = requireDefinition(scope);
-    if (recordId !== null) getById(scope, recordId);
-    else check(getCreateReadiness(scope).canCreate, "CANON_CREATE_PREREQUISITE_MISSING", "등록에 필요한 선행 설정을 먼저 등록해 주세요.");
-    validateInput(definition, input);
+    const existing = recordId !== null ? getById(scope, recordId) : null;
+    if (definition.key === 'skill') {
+      const attributeField = definition.fields.find(field => field.key === 'required_attribute');
+      check(attributeField?.valueType === 'REFERENCE_ONE' && attributeField.referenceSet?.key === 'attribute' && attributeField.required, 'CANON_REFERENCE_INVALID', '스킬의 필요 속성 정의를 확인해 주세요.');
+    }
+    if (recordId === null) check(getCreateReadiness(scope).canCreate, "CANON_CREATE_PREREQUISITE_MISSING", "등록에 필요한 선행 설정을 먼저 등록해 주세요.");
+    const attributeField = definition.key === 'skill' ? definition.fields.find(field => field.key === 'required_attribute') : null;
+    const allowLegacySkillMissing = Boolean(existing && attributeField && existing.fieldValues[attributeField.id] === null);
+    validateInput(definition, input, allowLegacySkillMissing);
     const id = recordId ?? randomUUID();
     const now = new Date().toISOString();
     if (recordId !== null) {

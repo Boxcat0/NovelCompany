@@ -7,6 +7,7 @@ labels.INNER_OR_CONTRACT_DIALOGUE = '생각 또는 계약자 대화';
 labels.SYSTEM_NOTIFICATION = '시스템 알림';
 labels.LOCATION_HEADER = '장소 표제';
 labels.INVALID = '해석 불가 표기';
+labels.SKILL_REQUIRED_ATTRIBUTE = '스킬 필요 속성';
 
 /** 읽기 전용 분석 DTO를 Scene·선택 이유·능력 보유 검증별로 요약하고 상세는 펼쳐서 보여준다. */
 export function ReviewContextPreview({ context }: { context: ReviewContext }) {

@@ -20,6 +20,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { randomUUID } = require('node:crypto');
 const { initializeDatabase, getDatabase, closeDatabase } = require("./database/database.cjs");
 const { createWork } = require("./database/repositories/work-repository.cjs");
 const { addEmptyCanonSpace } = require("./database/work-management-validation.cjs");
@@ -225,6 +226,11 @@ async function runValidation() {
     createWork({ title: "회차 UI 작품" });
     const episodeResult = await window.webContents.executeJavaScript("(" + exerciseEpisodes.toString() + ")()");
     const episodeWork = getDatabase().prepare("SELECT id FROM works WHERE title = ?").get("회차 UI 작품");
+    const queueEpisode = getDatabase().prepare('SELECT id FROM episodes WHERE work_id = ? AND episode_number = 1').get(episodeWork.id);
+    const queueSource = require('./review/review-service.cjs').buildCurrentSource(await require('./context/episode-work-context-builder.cjs').buildEpisodeWorkContext(episodeStorage, { workId: episodeWork.id, episodeId: queueEpisode.id }));
+    const queueUiJob = require('./database/repositories/review-job-repository.cjs').submit({ workId: episodeWork.id, episodeId: queueEpisode.id, episodeContentHash: queueSource.episodeContentHash, canonContextHash: queueSource.canonContextHash });
+    const queueUiResult = await window.webContents.executeJavaScript('(' + exerciseEpisodes.toString() + ')("queue-ui")');
+    assert.equal(getDatabase().prepare('SELECT status FROM review_jobs WHERE id = ?').get(queueUiJob.id).status, 'CANCELLED');
     const firstKey = episodeWork.id + "/episodes/001.txt";
     fs.unlinkSync(path.join(temporaryRoot, "works", firstKey));
     await window.webContents.executeJavaScript("(" + exerciseEpisodes.toString() + ")(\"missing\")");
@@ -252,6 +258,9 @@ async function runValidation() {
     const authorWork = createWork({ title: INITIAL_WORK_TITLE });
     const authorSpace = require("./database/repositories/canon-definition-repository.cjs").createCanonSpaceForWork(authorWork.id);
     require("./database/setup/install-current-work-canon.cjs").installCurrentWorkCanonDefinition(authorSpace.id);
+    const legacySkillSet = getDatabase().prepare("SELECT id FROM canon_sets WHERE canon_space_id = ? AND key = 'skill'").get(authorSpace.id);
+    const legacyNow = new Date().toISOString();
+    getDatabase().prepare('INSERT INTO canon_records VALUES (?, ?, ?, ?, ?, ?)').run(randomUUID(), authorSpace.id, legacySkillSet.id, '기존 미설정 스킬', legacyNow, legacyNow);
     const authoringResult = await window.webContents.executeJavaScript("(" + exerciseCanonAuthoring.toString() + ")()");
     const authoringScreenshotPath = path.join(artifactsRoot, "canon-authoring.png");
     fs.writeFileSync(authoringScreenshotPath, (await window.webContents.capturePage()).toPNG());
@@ -265,7 +274,7 @@ async function runValidation() {
       return definition;
     }));
     const authoringRaceResult = await window.webContents.executeJavaScript("(" + exerciseCanonAuthoring.toString() + ")('race')");
-    const report = { contextRaceResult, authoringResult, authoringRaceResult, authoringScreenshotPath, episodeResult, episodeScreenshotPath, result: "PASS", ...result, canonResult, deletionResult, persistence: "DB connection reopen + Renderer reload", screenshotPath, canonScreenshotPath, emptyScreenshotPath, deletionScreenshotPath, temporaryRoot, database: "isolated temporary DB" };
+    const report = { contextRaceResult, queueUiResult, authoringResult, authoringRaceResult, authoringScreenshotPath, episodeResult, episodeScreenshotPath, result: "PASS", ...result, canonResult, deletionResult, persistence: "DB connection reopen + Renderer reload", screenshotPath, canonScreenshotPath, emptyScreenshotPath, deletionScreenshotPath, temporaryRoot, database: "isolated temporary DB" };
     fs.writeFileSync(path.join(artifactsRoot, "result.json"), JSON.stringify(report, null, 2));
     console.log(JSON.stringify(report));
   } catch (error) {

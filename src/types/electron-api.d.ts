@@ -47,7 +47,7 @@ export type CanonSetDefinition = CanonSet & { fields: CanonFieldDefinition[] };
 export type CanonScope = { canonSpaceId: string; setId: string };
 export type CanonFormValue = string | number | boolean | null | string[];
 export type CanonRecordInput = { displayName: string; fieldValues: Record<string, CanonFormValue> };
-export type CanonRecordSummary = CanonScope & { id: string; displayName: string; createdAt: string; updatedAt: string };
+export type CanonRecordSummary = CanonScope & { id: string; displayName: string; createdAt: string; updatedAt: string; requiredAttributeMissing?: boolean };
 export type CanonRecord = CanonRecordSummary & CanonRecordInput;
 export type CreateReadiness = { canCreate: boolean; blockers: Array<{ targetSetId: string; targetSetName: string; requiredCount: number; currentCount: number }> };
 export type ReferenceOption = { id: string; displayName: string; disabled: boolean; description: string | null };
@@ -102,7 +102,7 @@ export type SourceRange = { start: number; end: number };
 export type CanonResolution = { status: 'MATCHED' | 'NOT_FOUND' | 'AMBIGUOUS' | 'UNRESOLVED'; recordId: string | null; candidateIds: string[] };
 export type NotationOccurrence = { type: string; raw: string; range: SourceRange; quoteContext: string | null; canonType?: string; resolution?: CanonResolution };
 export type ReviewContext = {
-  scope: 'RELEVANT_CANON'; selectorVersion: 'RELEVANT_CANON_V1'; rangeUnit: 'UTF16_HALF_OPEN';
+  scope: 'RELEVANT_CANON'; selectorVersion: 'RELEVANT_CANON_V2'; rangeUnit: 'UTF16_HALF_OPEN';
   work: WorkContext['work']; episode: WorkContext['episode'];
   scenes: Array<{ index: number; originalRange: SourceRange; locationHeading: string | null; timeHintRaw: string | null; locationCandidate: string | null; resolvedLocation: CanonResolution; narration: { type: 'CHARACTER' | 'EXTERNAL' | 'UNKNOWN'; characterId: string | null }; notationOccurrences: NotationOccurrence[]; directMentions: Array<CanonResolution & { name: string; range: SourceRange }>; selectedCanonIds: string[] }>;
   relevantCanon: { selectedSets: Array<{ key: string; label: string }>; selectedRecords: Array<WorkContext['canon']['sets'][number]['records'][number] & { setKey: string; setLabel: string }>; selectionReasons: Array<{ recordId: string; reason: string; sceneIndex: number; sourceRecordId: string | null; range: SourceRange | null }> };
@@ -117,13 +117,16 @@ export type ReviewRun = {
   episodeId: string;
   status: "RUNNING" | "COMPLETED" | "FAILED";
   processorKey: string;
-  source: { episodeContentHash: string; canonContextHash: string; contextMode: 'FULL_CANON_V1' | 'RELEVANT_CANON_V1' };
+  source: { episodeContentHash: string; canonContextHash: string; contextMode: 'FULL_CANON_V1' | 'RELEVANT_CANON_V1'; fingerprintVersion: 'V1' | 'V2' };
   freshness: { isCurrent: boolean; episodeChanged: boolean; canonChanged: boolean; contextChanged: boolean; canonComparison: 'COMPARABLE' | 'UNDETERMINED_EPISODE_CHANGED' };
   findings: ReviewFinding[];
   createdAt: string;
   startedAt: string;
   completedAt: string | null;
 };
+export type ReviewJobStatus = 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'RESUBMIT_REQUIRED';
+export type ReviewJob = { id: string; workId: string; episodeId: string; queueSequence: number; status: ReviewJobStatus; episodeContentHash: string; canonContextHash: string; contextMode: 'RELEVANT_CANON_V1'; fingerprintVersion: 'V2'; reviewRunId: string | null; errorCode: string | null; errorMessage: string | null; createdAt: string; startedAt: string | null; completedAt: string | null; workTitle: string; episodeNumber: number; episodeTitle: string };
+export type ReviewQueue = { running: ReviewJob[]; queued: ReviewJob[]; recent: ReviewJob[] };
 
 export type CreateWorkInput = {
   title: string;
@@ -202,7 +205,11 @@ export interface NovelCompanyApi {
     }): Promise<IpcResult<WorkContext>>;
   };
   reviews: {
-    start(input: { workId: string; episodeId: string }): Promise<IpcResult<ReviewRun>>;
+    start(input: { workId: string; episodeId: string }): Promise<IpcResult<ReviewJob>>;
+    submit(input: { workId: string; episodeId: string }): Promise<IpcResult<ReviewJob>>;
+    getQueue(): Promise<IpcResult<ReviewQueue>>;
+    getJobByEpisode(input: { workId: string; episodeId: string }): Promise<IpcResult<ReviewJob | null>>;
+    cancelQueued(reviewJobId: string): Promise<IpcResult<ReviewJob>>;
     getByEpisode(input: { workId: string; episodeId: string }): Promise<IpcResult<ReviewRun[]>>;
     getById(reviewRunId: string): Promise<IpcResult<ReviewRun>>;
   };

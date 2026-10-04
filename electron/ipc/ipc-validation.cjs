@@ -212,9 +212,10 @@ async function runValidation() {
     const startReview = ipcMain.handlers.get(IPC_CHANNELS.REVIEW_START);
     const reviewResult = await startReview(null, { workId: work.id, episodeId: episode.id });
     assert.equal(reviewResult.ok, true);
-    assert.equal(reviewResult.data.status, "COMPLETED");
-    assert.equal(reviewResult.data.processorKey, "STUB_V1");
-    assert.deepEqual(reviewResult.data.findings, []);
+    assert.ok(['QUEUED', 'RUNNING', 'COMPLETED'].includes(reviewResult.data.status));
+    for (let attempt = 0; attempt < 100 && getDatabase().prepare("SELECT status FROM review_jobs WHERE id = ?").get(reviewResult.data.id).status !== 'COMPLETED'; attempt++) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(getDatabase().prepare("SELECT status FROM review_jobs WHERE id = ?").get(reviewResult.data.id).status, 'COMPLETED');
+    assert.equal(getDatabase().prepare("SELECT processor_key FROM review_runs WHERE id = ?").get(getDatabase().prepare("SELECT review_run_id FROM review_jobs WHERE id = ?").get(reviewResult.data.id).review_run_id).processor_key, 'STUB_V1');
     const getReviewsByEpisode = ipcMain.handlers.get(IPC_CHANNELS.REVIEW_GET_BY_EPISODE);
     assert.equal((await getReviewsByEpisode(null, { workId: work.id, episodeId: episode.id })).data.length, 1);
     expectFailure(
@@ -325,7 +326,7 @@ async function runValidation() {
         IPC_CHANNELS.CANON_SETS_GET_BY_CANON_SPACE_ID,
         IPC_CHANNELS.CANON_SET_GET_DEFINITION,
         IPC_CHANNELS.CONTEXT_GET_EPISODE_WORK_CONTEXT,
-        IPC_CHANNELS.REVIEW_START,
+        IPC_CHANNELS.REVIEW_SUBMIT,
         IPC_CHANNELS.REVIEW_GET_BY_EPISODE,
         IPC_CHANNELS.REVIEW_GET_BY_ID,
       ],
@@ -364,7 +365,7 @@ async function runValidation() {
       "getEpisodeWorkContext",
       "getEpisodeReviewContext",
     ]);
-    assert.deepEqual(Object.keys(runtimePreloadApi.reviews), ["start", "getByEpisode", "getById"]);
+    assert.deepEqual(Object.keys(runtimePreloadApi.reviews), ["start", "submit", "getQueue", "getJobByEpisode", "cancelQueued", "getByEpisode", "getById"]);
     assert.equal("ipcRenderer" in runtimePreloadApi, false);
     assert.equal("require" in runtimePreloadApi, false);
 
@@ -402,7 +403,7 @@ async function runValidation() {
         IPC_CHANNELS.CANON_SETS_GET_BY_CANON_SPACE_ID,
         IPC_CHANNELS.CANON_SET_GET_DEFINITION,
         IPC_CHANNELS.CONTEXT_GET_EPISODE_WORK_CONTEXT,
-        IPC_CHANNELS.REVIEW_START,
+        IPC_CHANNELS.REVIEW_SUBMIT,
         IPC_CHANNELS.REVIEW_GET_BY_EPISODE,
         IPC_CHANNELS.REVIEW_GET_BY_ID,
       ],

@@ -7,6 +7,7 @@ const { getDatabaseFilePath } = require("../../storage/storage-paths.cjs");
 const { RepositoryError } = require("../repositories/repository-error.cjs");
 const { TASK016_CANON_SETS, CANON_SETS, INITIAL_WORK_TITLE, INITIAL_TEMPLATE_KEY } = require("./initial-canon-definition.cjs");
 const { insertCanonDefinition, assertCompleteDefinition } = require("./setup-initial-novel-canon.cjs");
+const { readFileSync } = require('node:fs');
 
 /** 지정 공간의 정의와 Record 개수를 실제 DB에서 읽어 설치 전후 검증에 사용한다. */
 function getDefinitionCounts(db, canonSpaceId) {
@@ -30,7 +31,7 @@ function refineInstalledDefinition(db, canonSpaceId) {
   for (const set of CANON_SETS) for (const field of set.fields) statement.run(Number(field[4]), canonSpaceId, canonSpaceId, set.key, field[0]);
 }
 
-/** 백업 뒤 빈 상태를 transaction 안에서 다시 확인하고 Task016 정의 설치와 required 정제를 원자적으로 수행한다. */
+/** 백업 뒤 Task016 원본 정의를 설치하고 현재 정책의 속성 필드를 같은 transaction에서 추가한다. */
 function installCurrentWorkCanonDefinition(canonSpaceId) {
   const db = getDatabase();
   const before = assertEmptyCurrentWorkCanon(db, canonSpaceId);
@@ -47,10 +48,11 @@ function installCurrentWorkCanonDefinition(canonSpaceId) {
     const installed = getDefinitionCounts(db, canonSpaceId);
     if (installed.records !== 0 || installed.sets !== TASK016_CANON_SETS.length || installed.fields !== TASK016_CANON_SETS.reduce((sum, set) => sum + set.fields.length, 0) || installed.options !== TASK016_CANON_SETS.reduce((sum, set) => sum + set.fields.reduce((n, field) => n + (field[6]?.length ?? 0), 0), 0)) throw new Error("Installed definition count mismatch");
     refineInstalledDefinition(db, canonSpaceId);
+    db.exec(readFileSync(path.join(__dirname, '../migrations/008_add_skill_required_attribute.sql'), 'utf8'));
     assertCompleteDefinition(db, canonSpaceId);
     if (db.prepare("PRAGMA foreign_key_check").all().length) throw new Error("Foreign key validation failed");
     db.exec("COMMIT");
-    return { ...before, before: before.counts, after: installed, backupPath };
+    return { ...before, before: before.counts, after: getDefinitionCounts(db, canonSpaceId), backupPath };
   } catch (cause) {
     db.exec("ROLLBACK");
     if (cause instanceof RepositoryError) throw cause;

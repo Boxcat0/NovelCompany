@@ -1,15 +1,17 @@
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain } = require("electron");
 const path = require("node:path");
 const { closeDatabase, initializeDatabase } = require("./database/database.cjs");
 const { registerEpisodeHandlers } = require("./ipc/episode-handlers.cjs");
 const { registerCanonHandlers } = require("./ipc/canon-handlers.cjs");
 const { registerContextHandlers } = require("./ipc/context-handlers.cjs");
 const { registerReviewHandlers } = require("./ipc/review-handlers.cjs");
+const { createReviewQueue } = require('./review/review-queue-service.cjs');
 const { registerWorkHandlers } = require("./ipc/work-handlers.cjs");
 const { LocalEpisodeStorage } = require("./storage/local-episode-storage.cjs");
 
 const isDevelopment = !app.isPackaged;
 const episodeStorage = new LocalEpisodeStorage();
+const reviewQueue = createReviewQueue(episodeStorage);
 
 /**
  * Renderer 보안 설정과 preload bridge를 포함한 애플리케이션 창을 만든다.
@@ -55,6 +57,7 @@ function quitOnWindowClosed() {
  * 앱 종료 전에 재사용 중인 SQLite 연결을 정상적으로 닫는다.
  */
 function closeDatabaseOnQuit() {
+  reviewQueue.stop();
   closeDatabase();
 }
 
@@ -69,9 +72,10 @@ async function startApplication() {
     registerCanonHandlers(ipcMain);
     registerEpisodeHandlers(ipcMain, episodeStorage);
     registerContextHandlers(ipcMain, episodeStorage);
-    registerReviewHandlers(ipcMain, episodeStorage);
+    registerReviewHandlers(ipcMain, episodeStorage, reviewQueue);
   } catch (error) {
-    console.error("Failed to initialize local data.", error);
+    console.error("로컬 데이터 또는 검토 대기열을 초기화하지 못했습니다.", error);
+    dialog.showErrorBox('로컬 데이터 시작 실패', '검토 대기열 또는 로컬 데이터를 복구하지 못했습니다. 오류를 확인한 뒤 다시 시작해 주세요.');
     app.quit();
     return;
   }

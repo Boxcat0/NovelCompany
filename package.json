@@ -19,7 +19,9 @@
     "build": "npm run typecheck && vite build",
     "package": "npm run build && electron-builder --win",
     "setup:current-work-canon": "node electron/database/setup/install-current-work-canon.cjs",
-    "test:review-context": "node electron/context/review-context-validation.cjs"
+    "test:review-context": "node electron/context/review-context-validation.cjs",
+    "test:skill-attribute": "node electron/database/skill-attribute-validation.cjs",
+    "test:review-queue": "node electron/review/review-queue-validation.cjs"
   },
   "build": {
     "appId": "com.novelcompany.app",

@@ -3,6 +3,8 @@ const { getDatabase } = require("./database/database.cjs");
 const episodes = require("./database/repositories/episode-repository.cjs");
 const { RepositoryError } = require("./database/repositories/repository-error.cjs");
 const { logIpcError } = require("./logging/logger.cjs");
+const { assertEpisodeOperationAvailable } = require('./review/episode-operation-gate.cjs');
+const { assertEpisodeUnlocked } = require('./database/repositories/review-job-repository.cjs');
 
 /** Renderer에는 저장 키/해시/실제 경로를 제외한 metadata만 반환한다. */
 function toPublicEpisode(episode) {
@@ -66,8 +68,10 @@ function createEpisodeWithContent(storage, input) {
 /** Episode ID는 유지하고 번호 변경 시 TXT 위치도 함께 바꾸며 원본 복원 계획을 만든다. */
 function updateEpisodeWithContent(storage, id, input) {
   const data = validateEpisodeInput(input);
+  assertEpisodeOperationAvailable(id);
   return runEpisodeOperation("update", () => {
     const previous = episodes.getEpisodeForWork(data.workId, id);
+    assertEpisodeUnlocked(id);
     episodes.requireAvailableEpisodeNumber(data.workId, data.episodeNumber, id);
     const storageKey = previous.episodeNumber === data.episodeNumber ? previous.storageKey : storage.getStorageKey(data.workId, data.episodeNumber);
     const change = storage.stageWrite(data.workId, storageKey, data.content, previous.storageKey);
@@ -80,8 +84,10 @@ function updateEpisodeWithContent(storage, id, input) {
 
 /** 소속을 확인하고 TXT를 복원 가능한 백업으로 격리한 뒤 metadata와 함께 삭제한다. */
 function deleteEpisodeWithContent(storage, id, workId) {
+  assertEpisodeOperationAvailable(id);
   return runEpisodeOperation("delete", () => {
     const previous = episodes.getEpisodeForWork(workId, id);
+    assertEpisodeUnlocked(id);
     const change = storage.stageDelete(workId, previous.storageKey);
     return { change,
       /** Episode metadata만 삭제하고 Work 및 다른 회차는 보존한다. */

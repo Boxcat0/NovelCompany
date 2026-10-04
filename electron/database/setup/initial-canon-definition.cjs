@@ -24,7 +24,7 @@ function refineInitialCanonSets() {
     if (set.key === 'character') refined[4] = ['origin_location', 'attributes', 'passives'].includes(field[0]);
     if (set.key === 'relationship' && field[0] === 'relationship_type') refined[4] = true;
     return refined;
-  }) }));
+  }).concat(set.key === 'skill' ? [['required_attribute', '필요 속성', 'REFERENCE_ONE', 'COMBOBOX', true, 'attribute']] : []) }));
 }
 const CANON_SETS = refineInitialCanonSets();
 module.exports = { TASK016_CANON_SETS, CANON_SETS, INITIAL_WORK_TITLE, INITIAL_TEMPLATE_KEY };

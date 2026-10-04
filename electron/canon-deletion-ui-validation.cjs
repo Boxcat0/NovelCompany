@@ -105,7 +105,7 @@ async function exerciseCanonDeletion(restarted = false) {
   check(name.value === "미저장 수정", "Dirty cancel lost input");
   answers = [true, false]; click("Canon 전체 삭제");
   await waitFor(() => !button("Canon 전체 삭제").disabled, "impact cancel");
-  check(confirmations.at(-1).includes("Canon Set: 11개") && confirmations.at(-1).includes("Canon Field: 30개") && confirmations.at(-1).includes("Canon Record: 3개") && confirmations.at(-1).includes("기타 연결·기존 Canon 데이터: 22행"), "Impact counts incorrect");
+  check(confirmations.at(-1).includes("Canon Set: 11개") && confirmations.at(-1).includes("Canon Field: 31개") && confirmations.at(-1).includes("Canon Record: 3개") && confirmations.at(-1).includes("기타 연결·기존 Canon 데이터: 22행"), "Impact counts incorrect");
   answers = [true, true, false]; click("Canon 전체 삭제");
   await waitFor(() => !button("Canon 전체 삭제").disabled, "final cancel");
   check(confirmations.at(-1).includes("삭제 후 복구할 수 없습니다."), "Strong confirmation missing");

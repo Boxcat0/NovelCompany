@@ -94,8 +94,16 @@ function getEpisodeReviewContext(input) {
   return ipcRenderer.invoke('context:get-episode-review-context', input);
 }
 
-/** 저장된 Episode와 Canon 기준으로 Stub ReviewRun을 시작하도록 Main에 요청한다. */
-function startReview(input) { return ipcRenderer.invoke("reviews:start", input); }
+/** 저장된 Episode를 검토 대기열에 접수하도록 Main에 요청한다. */
+function submitReview(input) { return ipcRenderer.invoke("reviews:submit", input); }
+
+/** 전역 대기열과 선택 회차의 최근 제출 상태를 읽는다. */
+function getReviewQueue() { return ipcRenderer.invoke('reviews:get-queue'); }
+/** 선택한 작품·회차의 최신 제출 상태만 읽는다. */
+function getReviewJobByEpisode(input) { return ipcRenderer.invoke('reviews:get-job-by-episode', input); }
+
+/** QUEUED 제출만 조건부로 철회한다. */
+function cancelQueuedReview(id) { return ipcRenderer.invoke('reviews:cancel-queued', id); }
 
 /** 현재 source freshness가 계산된 Episode Review history를 Main에서 읽는다. */
 function getReviewsByEpisode(input) { return ipcRenderer.invoke("reviews:get-by-episode", input); }
@@ -166,7 +174,7 @@ function exposeNovelCompanyApi() {
       getEpisodeWorkContext,
       getEpisodeReviewContext,
     },
-    reviews: { start: startReview, getByEpisode: getReviewsByEpisode, getById: getReviewById },
+    reviews: { start: submitReview, submit: submitReview, getQueue: getReviewQueue, getJobByEpisode: getReviewJobByEpisode, cancelQueued: cancelQueuedReview, getByEpisode: getReviewsByEpisode, getById: getReviewById },
   });
 }
 

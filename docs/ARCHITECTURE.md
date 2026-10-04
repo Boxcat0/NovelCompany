@@ -1,5 +1,23 @@
 # NovelCompany 아키텍처
 
+## Task026 — 검토 제출·FIFO·회차 잠금
+
+WorksScreen은 저장된 회차를 `reviews.submit`으로 제출한다. Main의 Review Queue Service는 TXT/Canon으로 WorkContext와 ReviewContext를 만든 뒤 원고 hash와 Relevant Canon V2 hash를 `review_jobs`에 QUEUED로 저장한다. 접수 성공은 실행 완료가 아니라 영속 대기열 등록이다. 기존 `reviews.start` IPC도 동일 제출 경로로 위임한다.
+
+Worker는 `queue_sequence`가 가장 작은 QUEUED Job을 읽고 실행 직전 Context를 다시 빌드한다. 원고 또는 관련 Canon fingerprint가 다르면 RESUBMIT_REQUIRED로 종료하며 Processor를 호출하지 않는다. Context 읽기·구조 오류는 FAILED로 구분한다. 입력이 같으면 DB transaction에서 Job을 RUNNING으로 선점하고 ReviewRun을 생성·연결한다. Processor에는 이때 고정한 Context만 전달한다. Findings/Run/Job 완료 또는 Run/Job 실패는 각각 한 transaction에 기록하며 다음 Job을 처리한다. 전역 RUNNING partial unique index와 단일 Main Worker가 동시 실행을 제한한다.
+
+QUEUED/RUNNING Job은 Episode의 논리적 편집 잠금이다. Episode Service는 TXT staging 전에 DB를 검사하고 Episode Repository도 metadata 수정·삭제를 검사한다. 제출의 비동기 TXT 읽기 동안 같은 Episode 저장은 Main의 Episode 단위 operation gate가 막는다. 저장은 기존 BEGIN IMMEDIATE → 파일 staging → metadata → 파일 게시 → COMMIT/rollback 구조이며 transaction 안에 await가 없다. QUEUED 철회는 DB 조건부 전이로 CANCELLED 처리하고 잠금을 해제한다. 재제출은 새 Job과 새 접수 순번을 만든다. OS 외부 편집 자체는 막지 못하며 Worker의 content hash 검사로 변경을 감지한다.
+
+앱 시작 시 migration 후 이전 RUNNING Job/Run을 REVIEW_INTERRUPTED로 FAILED 처리하고 QUEUED를 순서대로 재개한다. 중단 실행을 자동 재호출하지 않아 미래 유료 AI 중복 호출을 피한다. UI는 활성 대기열에서 2초, 유휴 상태에서 5초 간격으로 상태를 읽고 회차별 응답 순번으로 늦은 응답을 폐기한다. STUB_V1은 실제 문장·Canon 판정이 아니다.
+
+## Task025-HF01 — Skill 필요 속성
+
+Generic `skill.required_attribute`는 같은 CanonSpace의 `attribute` Record를 가리키는 필수 `REFERENCE_ONE`/`COMBOBOX` Field다. `CANON_SETS`의 신규 정의와 migration 008의 기존 Definition 보정에 동일한 key·label·참조 Set·필수 정책을 적용한다. migration은 Skill/Attribute Set이 같은 공간에 있는 대상만 추가하고 기존 Field·Record·Value·Reference를 교체하지 않는다. 기존 미설정 Skill은 null로 남아 목록·폼에서 미설정으로 보이며, 신규 Skill은 속성 없이는 생성할 수 없다. 기존 미설정 Skill의 수정은 원래의 null 상태일 때만 허용하고, 한 번 지정한 속성은 필수로 유지한다. 참조 범위 검사와 `canon_reference_one_limit`이 교차 작품·복수 속성을 차단한다.
+
+기존 DB에 008/009를 적용하기 전 `initializeDatabase`가 대상 CanonSpace/Set과 동명 Field 충돌을 확인하고 `backups/before-task025-hf01-<UUID>.db`를 만든다. 백업 실패 시 migration을 실행하지 않는다. migration 후 같은 대상을 다시 읽어 Field 설치를 검증한다. 초기 설정 도구는 31 Field를 설치하며, 기존 빈 CanonSpace 복구 도구는 Task016 원본 30 Field 설치 뒤 같은 transaction에서 필요 속성 Field를 추가한다. 실제 사용자 DB에 대한 수동 검토는 대상 CanonSpace와 백업 경로 확인 후 진행한다.
+
+ReviewContext V2는 선택된 Skill의 `required_attribute`를 읽고 해당 Attribute Record를 관련 Canon에 1단계 포함한다. 신규 Run의 `fingerprint_version=V2` 해시는 Skill의 참조 및 Attribute 값을 반영한다. 과거 V1 Run은 필요 속성 Field와 새 확장 경로를 제외해 기존 해시 규칙으로 비교한다. Scene 문맥에서 Skill 사용자를 새로 추론하거나 Character.attributes와 적합성을 판정하지 않는다.
+
 ## Task025 — Scene-aware ReviewContext
 
 저장된 TXT → `buildEpisodeWorkContext(FULL_CANON)` → `buildReviewContext(RELEVANT_CANON_V1)` → `STUB_V1` → ReviewRun. Preview도 `buildEpisodeReviewContext`를 통해 동일 순수 builder를 사용한다. 분석은 메모리에서만 계산하고 Work/Episode/TXT 및 Canon은 쓰지 않는다. Repository에서 원고와 Canon을 중복 조합하지 않는다.
@@ -263,7 +281,7 @@ ConceptScreen의 별도 Canon 관리 영역에서 `handleDeleteCanon`이 `canLea
 
 `Review Service → buildEpisodeWorkContext → source fingerprint → ReviewRun → Stub Review Processor → ReviewResult → Review Repository` 경로를 사용한다. Review는 TXT와 Canon의 derived read-only 작업 기록이며 원본 TXT, Episode metadata, Canon definition/record를 수정하지 않는다.
 
-Renderer는 `reviews.start`, `reviews.getByEpisode`, `reviews.getById`만 preload bridge로 호출한다. source hash 및 freshness 계산은 Main service가 수행하며, Renderer에는 경로·storageKey·raw error·SQL row를 노출하지 않는다. Stub processor는 `STUB_V1` metadata와 빈 findings만 반환하며 실제 AI 또는 문장/Canon 판정을 수행하지 않는다.
+Task024의 직접 Review Service는 기존 내부 검증에 남고, Renderer의 `reviews.start`는 Task026 제출 경로로 위임된다. `reviews.submit/getQueue/getJobByEpisode/cancelQueued`와 기존 history 조회는 preload bridge를 사용한다. source hash 및 freshness 계산은 Main service가 수행하며, Renderer에는 경로·storageKey·raw error·SQL row를 노출하지 않는다. Stub processor는 `STUB_V1` metadata와 빈 findings만 반환하며 실제 AI 또는 문장/Canon 판정을 수행하지 않는다.
 
 ## Task023 — Episode + Canon Read-only Work Context Builder
 

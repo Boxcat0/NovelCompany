@@ -30,7 +30,7 @@ function validateCanonBootstrap(root) {
     assert.equal(getDefinitionCounts(db, space.id).sets, 1);
     db.exec("DELETE FROM canon_sets WHERE id = 'partial'");
     const result = install(space.id);
-    assert.deepEqual(result.after, { sets: 11, fields: 30, options: 4, records: 0 });
+    assert.deepEqual(result.after, { sets: 11, fields: 31, options: 4, records: 0 });
     assert.deepEqual(db.prepare("SELECT * FROM canon_spaces WHERE id=?").get(space.id), spaceBefore);
     assert.deepEqual(db.prepare("SELECT * FROM works WHERE id=?").get(work.id), workBefore);
     assert.deepEqual(db.prepare("SELECT key FROM canon_sets WHERE canon_space_id=? ORDER BY sort_order").all(space.id).map((row) => row.key), TASK016_CANON_SETS.map((set) => set.key));
