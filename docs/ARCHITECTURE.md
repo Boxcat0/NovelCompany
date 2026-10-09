@@ -1,5 +1,25 @@
 # NovelCompany 아키텍처
 
+## Task028 — Character 별칭과 명칭 후보
+
+Generic Character를 먼저 저장하고 `canon.aliases.list/create/update/delete`로 0개 이상의 별칭을 관리한다. Work → 현재 CanonSpace → character Record 범위를 Repository가 매번 검증한다. ConceptScreen의 별칭 영역은 DynamicCanonForm과 독립되어 Character draft를 보존한다. 쓰기 중 이동은 막고, 조회는 Character/Work별 component key와 요청 sequence로 이전 응답을 폐기한다. 저장된 소속은 기존 organization 참조 선택지에서 읽는다.
+
+WorkContext의 Character에는 `registeredAliases` 표시 문자열을 담는다. `resolveCharacterNames`는 정식 이름과 등록 Alias를 NFC 검색 view에서 읽고 grapheme별 대응으로 실제 UTF-16 원문 범위를 반환한다. 긴 명칭을 우선하고 단어 내부 일치는 거부하며 완결된 한국어 조사만 허용한다. 장소·알림·능력 등 구조 표기는 Character 명칭으로 해석하지 않는다. 대사/내면 인용 문맥은 후보 evidence로 보존한다. 문맥 대명사 그분/그 녀석/그녀석/그 사람은 Alias로 등록되어도 unresolved로 남긴다.
+
+ReviewContext `nameMentions`는 원문·범위·Scene identity·일치 유형·모든 Character 후보와 실제 Organization identity를 포함한다. 후보는 Record ID로 중복 제거한다. MATCHED는 등록 명칭 후보가 하나라는 뜻이며 실제 발화 대상이나 Speaker를 확정하지 않는다. 복수 후보는 AMBIGUOUS이고 Organization으로 좁히지 않는다. 단일 후보만 기존 Character 1-hop Relevant Canon 확장에 연결하고 선택 이유에 정식 이름/별칭을 구분한다. Ability Ownership Checks, Scene/Notation Parser와 Scene Narration V1은 유지한다.
+
+신규 selector/hash는 `RELEVANT_CANON_V3` 및 `CHARACTER_NAMES_V1`을 사용한다. 저장 discriminator는 기존 `fingerprint_version=V2`와 nullable `name_resolution_version`의 조합이다. 구버전 CHECK를 바꾸려고 Review 테이블을 재작성하지 않는다. 과거 null 버전 Run/Job은 기존 이름 탐지 경로와 기존 V1/V2 해시로 비교/실행한다. Canon Alias 변경은 QUEUED/RUNNING에서도 허용하며 신규 Job의 실제 명칭 후보가 달라지면 Worker가 RESUBMIT_REQUIRED로 종료한다. 실행 중 Context는 교체하지 않는다.
+
+## Task027 — 작가 지정 장면 시점
+
+저장 TXT → Task025 `parseSceneLayout` → 버전 일치 Scene Narration → ReviewContext → ReviewJob/Run 흐름이다. 기존 장면 경계 코드를 추출하여 목록과 Review가 같은 파서를 사용한다. TXT에 POV 태그를 쓰지 않는다. SQLite Metadata는 `FIRST_PERSON_CHARACTER`, `EXTERNAL_THIRD_PERSON`, `UNKNOWN` 세 모드와 Generic Character ID를 저장한다. 명시적 설정은 `AUTHOR_SET`, 저장 행이 없으면 `UNKNOWN/UNSET`이다. Narrator identity만 전달하며 Relevant Canon 확장과 abilityOwnershipChecks는 그대로 유지한다. 서술자·대사 화자·스킬 사용자를 자동 연결하지 않고 STUB_V1의 빈 findings 정책을 유지한다.
+
+`sceneNarration.getForEpisode/save`는 self-contained preload의 제한된 DTO API다. 저장 서비스가 Episode operation gate 안에서 TXT를 다시 읽고 content hash, `SCENE_LAYOUT_V1`, deterministic scene identity를 검사한다. Repository는 transaction 안에서 같은 Work의 character Record, 모드 조합과 QUEUED/RUNNING 잠금을 재검사한다. 다른 원고/파서 버전의 Metadata는 보존하되 적용하지 않는다. 외부 파일 변경도 오래된 저장 요청을 거부한다.
+
+WorksScreen의 SceneNarrationEditor는 미저장 원고에서 시점 편집을 막는다. 미저장 시점은 원고 편집·제출을 막고 이동/종료 시 폐기 확인을 받는다. 저장 중 이동을 막으며 회차별 component key와 요청 sequence로 늦은 응답을 폐기한다. 시점 저장 후 Review freshness를 다시 읽는다. 인물 선택지는 실제 Work Canon에서 조회한다.
+
+별도 `SCENE_NARRATION_V1` fingerprint를 신규 Job/Run에 기록하고 Worker 실행 전에 재비교한다. Canon은 계속 잠그지 않는다. Character 삭제 trigger는 해당 시점을 UNKNOWN으로 무효화하며 전체 Canon 삭제·재시작을 허용한다. 이 lifecycle 정리는 활성 Review가 있어도 허용하고 Worker hash 비교로 재제출 필요 상태를 판정한다.
+
 ## Task026 — 검토 제출·FIFO·회차 잠금
 
 WorksScreen은 저장된 회차를 `reviews.submit`으로 제출한다. Main의 Review Queue Service는 TXT/Canon으로 WorkContext와 ReviewContext를 만든 뒤 원고 hash와 Relevant Canon V2 hash를 `review_jobs`에 QUEUED로 저장한다. 접수 성공은 실행 완료가 아니라 영속 대기열 등록이다. 기존 `reviews.start` IPC도 동일 제출 경로로 위임한다.

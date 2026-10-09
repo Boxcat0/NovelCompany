@@ -1,4 +1,6 @@
 const { buildEpisodeWorkContext } = require('./episode-work-context-builder.cjs');
+const { applySceneNarration } = require('./scene-narration.cjs');
+const { resolveCharacterNames, NAME_RESOLUTION_VERSION } = require('./character-name-resolver.cjs');
 const SET_KEYS = new Set(['character', 'location', 'world', 'organization', 'attribute', 'skill', 'passive', 'authority', 'servant', 'relationship', 'contract']);
 const CHARACTER_FIELDS = new Set(['origin_world', 'origin_location', 'current_location', 'organization', 'attributes', 'skills', 'passives']);
 
@@ -63,36 +65,47 @@ function resolveCandidates(candidates) {
   return { status: candidates.length === 1 ? 'MATCHED' : candidates.length ? 'AMBIGUOUS' : 'NOT_FOUND', recordId: candidates.length === 1 ? candidates[0].id : null, candidateIds: candidates.map(record => record.id).sort() };
 }
 
-/** FULL_CANON DTO 하나에서 Scene, 1-hop 관련 Canon, 능력 보유 검증을 읽기 전용으로 파생한다. */
-function buildReviewContext(workContext) {
+/** 기존 Task025의 장소 표제 경계와 표기를 단일 Scene layout으로 재사용한다. */
+function parseSceneLayout(content, parsed = parseNotation(content)) {
+  const headings = parsed.occurrences.filter(item => item.type === 'LOCATION_HEADER');
+  const starts = [...new Set([0, ...headings.map(item => item.range.start)])];
+  return starts.map((start, index) => {
+    const end = starts[index + 1] ?? content.length;
+    const heading = headings.find(item => item.range.start === start);
+    const timeHintRaw = heading?.name.startsWith('그 시각 ') ? '그 시각' : null;
+    const locationCandidate = heading ? (timeHintRaw ? heading.name.slice(5).trim() : heading.name) : null;
+    return { index: index + 1, originalRange: { start, end }, locationHeading: heading?.name ?? null, timeHintRaw, locationCandidate, notationOccurrences: parsed.occurrences.filter(item => item.range.start >= start && item.range.start < end).map(item => ({ ...item })) };
+  });
+}
+
+/** FULL_CANON의 기존 선택·소유 판정은 유지하고 작가의 버전 일치 POV만 별도 입력으로 추가한다. */
+function buildReviewContext(workContext, narrationRows = [], nameResolutionVersion = NAME_RESOLUTION_VERSION) {
+  if (nameResolutionVersion !== null && nameResolutionVersion !== NAME_RESOLUTION_VERSION) throw new Error('Unsupported name-resolution version.');
   if (workContext.scope !== 'FULL_CANON') throw new Error('FULL_CANON context is required');
   const content = workContext.episode.content;
   const parsed = parseNotation(content);
   const records = workContext.canon.sets.filter(set => SET_KEYS.has(set.key)).flatMap(set => set.records.map(record => ({ ...record, setKey: set.key, setLabel: set.label })));
   const byId = new Map(records.map(record => [record.id, record]));
-  const headings = parsed.occurrences.filter(item => item.type === 'LOCATION_HEADER');
-  const starts = [...new Set([0, ...headings.map(item => item.range.start)])];
-  const scenes = starts.map((start, index) => {
-    const end = starts[index + 1] ?? content.length;
-    const heading = headings.find(item => item.range.start === start);
-    const timeHintRaw = heading?.name.startsWith('그 시각 ') ? '그 시각' : null;
-    const locationCandidate = heading ? (timeHintRaw ? heading.name.slice(5).trim() : heading.name) : null;
-    return { index: index + 1, originalRange: { start, end }, locationHeading: heading?.name ?? null, timeHintRaw, locationCandidate, resolvedLocation: resolveCandidates(records.filter(record => record.setKey === 'location' && record.displayName === locationCandidate)), narration: { type: 'UNKNOWN', characterId: null }, notationOccurrences: parsed.occurrences.filter(item => item.range.start >= start && item.range.start < end).map(item => ({ ...item })), directMentions: [], selectedCanonIds: [] };
-  });
+  const characters = records.filter(record => record.setKey === 'character').map(record => ({ recordId: record.id, setKey: 'character', displayName: record.displayName }));
+  const snapshot = applySceneNarration(content, parseSceneLayout(content, parsed), narrationRows, characters);
+  const scenes = snapshot.scenes.map(scene => ({ ...scene, resolvedLocation: resolveCandidates(records.filter(record => record.setKey === 'location' && record.displayName === scene.locationCandidate)), directMentions: [], selectedCanonIds: [] }));
+  const nameMentions = nameResolutionVersion ? resolveCharacterNames(content, scenes, records.filter(record => record.setKey === 'character')) : [];
   const selected = new Map(), reasons = [], unresolvedMentions = [], checks = [];
   /** 같은 Record는 한 번만 보관하고 Scene별 선택 경로는 중복 없이 누적한다. */
   function select(id, reason, scene, sourceRecordId = null, range = null) {
     const record = byId.get(id);
     if (!record) return;
-    selected.set(id, record);
+    const { registeredAliases: _aliases, ...selectedRecord } = record;
+    selected.set(id, selectedRecord);
     if (!scene.selectedCanonIds.includes(id)) scene.selectedCanonIds.push(id);
     const entry = { recordId: id, reason, sceneIndex: scene.index, sourceRecordId, range };
     if (!reasons.some(item => JSON.stringify(item) === JSON.stringify(entry))) reasons.push(entry);
   }
-  const names = [...new Set(records.map(record => record.displayName).filter(Boolean))].sort((a, b) => b.length - a.length || a.localeCompare(b, 'en'));
+  const names = [...new Set(records.filter(record => !nameResolutionVersion || record.setKey !== 'character').map(record => record.displayName).filter(Boolean))].sort((a, b) => b.length - a.length || a.localeCompare(b, 'en'));
   for (const scene of scenes) {
     const { start, end } = scene.originalRange;
-    const covered = [];
+    const sceneNames = nameMentions.filter(mention => mention.sceneIndex === scene.index);
+    const covered = sceneNames.map(mention => mention.range);
     for (const name of names) {
       let offset = content.indexOf(name, start);
       while (offset >= start && offset + name.length <= end) {
@@ -100,7 +113,7 @@ function buildReviewContext(workContext) {
         if (!covered.some(item => range.start < item.end && range.end > item.start)) {
           covered.push(range);
           const notation = scene.notationOccurrences.find(item => item.range.start <= offset && item.range.end >= range.end && ['LOCATION_HEADER', 'SERVANT', 'SKILL_OR_PASSIVE', 'AUTHORITY'].includes(item.type));
-          const keys = notation?.type === 'LOCATION_HEADER' ? ['location'] : notation?.type === 'SERVANT' ? ['servant'] : notation?.type === 'SKILL_OR_PASSIVE' ? ['skill', 'passive'] : notation?.type === 'AUTHORITY' ? [] : [...SET_KEYS];
+          const keys = notation?.type === 'LOCATION_HEADER' ? ['location'] : notation?.type === 'SERVANT' ? ['servant'] : notation?.type === 'SKILL_OR_PASSIVE' ? ['skill', 'passive'] : notation?.type === 'AUTHORITY' ? [] : [...SET_KEYS].filter(key => !nameResolutionVersion || key !== 'character');
           const resolution = resolveCandidates(records.filter(record => keys.includes(record.setKey) && record.displayName === name));
           scene.directMentions.push({ name, range, ...resolution });
           if (resolution.recordId) select(resolution.recordId, 'DIRECT_MENTION', scene, null, range);
@@ -108,6 +121,11 @@ function buildReviewContext(workContext) {
         }
         offset = content.indexOf(name, offset + name.length);
       }
+    }
+    for (const mention of sceneNames) {
+      scene.directMentions.push({ name: mention.text, range: mention.range, status: mention.status, recordId: mention.recordId, candidateIds: mention.candidateIds });
+      if (mention.recordId) select(mention.recordId, mention.candidates[0].matchTypes.includes('DISPLAY_NAME') ? 'CHARACTER_DISPLAY_NAME' : 'CHARACTER_REGISTERED_ALIAS', scene, null, mention.range);
+      else unresolvedMentions.push({ raw: mention.text, range: mention.range, sceneIndex: scene.index, status: 'AMBIGUOUS', candidateIds: mention.candidateIds });
     }
     if (scene.resolvedLocation.recordId) select(scene.resolvedLocation.recordId, 'LOCATION_HEADER', scene);
     for (const notation of scene.notationOccurrences.filter(item => ['SKILL_OR_PASSIVE', 'SERVANT', 'AUTHORITY'].includes(item.type))) {
@@ -149,12 +167,16 @@ function buildReviewContext(workContext) {
   const selectedRecords = [...selected.values()].sort((a, b) => a.id.localeCompare(b.id, 'en'));
   const selectedSets = workContext.canon.sets.filter(set => selectedRecords.some(record => record.setKey === set.key)).map(set => ({ key: set.key, label: set.label })).sort((a, b) => a.key.localeCompare(b.key, 'en'));
   const warnings = [...parsed.warnings, ...scenes.flatMap(scene => scene.notationOccurrences.filter(item => item.resolution && item.resolution.status !== 'MATCHED').map(item => ({ range: item.range, message: item.resolution.status === 'AMBIGUOUS' ? '능력 표기에 여러 Canon 후보가 있습니다.' : item.type === 'AUTHORITY' ? '권능 표기와 Canon을 연결할 확정 규칙이 없습니다.' : '능력 표기와 일치하는 Canon이 없습니다.' }))), ...scenes.filter(scene => scene.locationHeading && scene.resolvedLocation.status !== 'MATCHED').map(scene => ({ range: scene.originalRange, message: '장소 Canon 연결이 미등록 또는 모호한 상태입니다.' }))];
-  return { scope: 'RELEVANT_CANON', selectorVersion: 'RELEVANT_CANON_V2', rangeUnit: 'UTF16_HALF_OPEN', work: { ...workContext.work }, episode: { ...workContext.episode }, scenes, relevantCanon: { selectedSets, selectedRecords, selectionReasons: reasons }, abilityOwnershipChecks: checks, unresolvedMentions, warnings };
+  for (const scene of scenes.filter(scene => scene.narration.status === 'NARRATOR_DELETED')) warnings.push({ range: scene.originalRange, message: '지정한 서술자 Canon이 삭제되었거나 유효하지 않습니다. 장면 시점을 다시 확인해 주세요.' });
+  if (snapshot.hasStaleMetadata && scenes.some(scene => scene.narration.source === 'UNSET')) warnings.push({ range: { start: 0, end: content.length }, message: '원고 또는 장면 구조가 변경되어 기존 장면 시점 설정을 자동 적용할 수 없습니다. 현재 장면의 시점을 다시 확인해 주세요.' });
+  const { scenes: _scenes, ...sceneMetadata } = snapshot;
+  return { scope: 'RELEVANT_CANON', selectorVersion: nameResolutionVersion ? 'RELEVANT_CANON_V3' : 'RELEVANT_CANON_V2', nameResolutionVersion, nameMentions, rangeUnit: 'UTF16_HALF_OPEN', work: { ...workContext.work }, episode: { ...workContext.episode }, sceneMetadata, scenes, relevantCanon: { selectedSets, selectedRecords, selectionReasons: reasons }, abilityOwnershipChecks: checks, unresolvedMentions, warnings };
 }
 
 /** Preview와 Review 실행이 같은 WorkContext 출발점과 순수 분석 함수를 사용하게 한다. */
 async function buildEpisodeReviewContext(storage, input) {
-  return buildReviewContext(await buildEpisodeWorkContext(storage, input));
+  const workContext = await buildEpisodeWorkContext(storage, input);
+  return buildReviewContext(workContext, require('../database/repositories/scene-narration-repository.cjs').getForEpisode(workContext.episode.id));
 }
 
-module.exports = { parseNotation, buildReviewContext, buildEpisodeReviewContext };
+module.exports = { parseNotation, parseSceneLayout, buildReviewContext, buildEpisodeReviewContext };

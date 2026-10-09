@@ -93,6 +93,7 @@ function getCanonDeletionStatus(workId) {
     const genericCounts = genericDeletionTables.map(([table, key]) => `(SELECT COUNT(*) FROM ${table} WHERE canon_space_id = c.id) AS ${key}`);
     const legacyCount = legacyDeletionTables.map((table) => `(SELECT COUNT(*) FROM ${table} WHERE canon_space_id = c.id)`).join(" + ");
     const row = getDatabase().prepare(`SELECT c.id AS canonSpaceId, ${genericCounts.join(", ")},
+      (SELECT COUNT(*) FROM canon_record_aliases a JOIN canon_records r ON r.id = a.canon_record_id WHERE r.canon_space_id = c.id) AS aliasCount,
       (${legacyCount}) AS legacyDataCount
       FROM works w LEFT JOIN canon_spaces c ON c.work_id = w.id WHERE w.id = ?`).get(workId);
     if (!row) throw new RepositoryError("WORK_NOT_FOUND", "선택한 작품을 찾을 수 없습니다.");
@@ -102,7 +103,8 @@ function getCanonDeletionStatus(workId) {
       canonSpaceId: row.canonSpaceId,
       ...counts,
       legacyDataCount: row.legacyDataCount,
-      totalDependentRowCount: Object.values(counts).reduce((total, count) => total + count, row.legacyDataCount),
+      aliasCount: row.aliasCount,
+      totalDependentRowCount: Object.values(counts).reduce((total, count) => total + count, row.legacyDataCount + row.aliasCount),
     };
   } catch (cause) {
     if (cause instanceof RepositoryError) throw cause;

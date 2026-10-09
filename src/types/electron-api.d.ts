@@ -28,6 +28,7 @@ export type StoredEpisode = Episode & {
 
 export type CanonSpace = { id: string; workId: string; templateKey: string; createdAt: string; updatedAt: string };
 export type CanonDeletionStatus = {
+  aliasCount: number;
   exists: boolean;
   canonSpaceId: string | null;
   setCount: number;
@@ -45,6 +46,8 @@ export type CanonSet = { id: string; canonSpaceId: string; key: string; name: st
 export type CanonFieldDefinition = { id: string; key: string; label: string; valueType: string; inputControl: string; required: boolean; helpText: string | null; sortOrder: number; referenceSet: { id: string; key: string; name: string } | null; options: Array<{ id: string; value: string; label: string; sortOrder: number }> };
 export type CanonSetDefinition = CanonSet & { fields: CanonFieldDefinition[] };
 export type CanonScope = { canonSpaceId: string; setId: string };
+export type CanonAliasScope = { workId: string; recordId: string };
+export type CanonAlias = { id: string; recordId: string; aliasText: string; createdAt: string; updatedAt: string };
 export type CanonFormValue = string | number | boolean | null | string[];
 export type CanonRecordInput = { displayName: string; fieldValues: Record<string, CanonFormValue> };
 export type CanonRecordSummary = CanonScope & { id: string; displayName: string; createdAt: string; updatedAt: string; requiredAttributeMissing?: boolean };
@@ -86,6 +89,7 @@ export type WorkContext = {
       records: Array<{
         id: string;
         displayName: string;
+        registeredAliases?: string[];
         fields: Array<{
           key: string;
           label: string;
@@ -99,12 +103,19 @@ export type WorkContext = {
 
 export type ReviewFindingCategory = "TYPO" | "SPACING" | "GRAMMAR" | "CANON" | "OTHER";
 export type SourceRange = { start: number; end: number };
+export type NarrationMode = 'FIRST_PERSON_CHARACTER' | 'EXTERNAL_THIRD_PERSON' | 'UNKNOWN';
+export type SceneNarration = { mode: NarrationMode; source: 'AUTHOR_SET' | 'UNSET'; narratorCharacter: WorkContextReference | null; status: 'VALID' | 'NARRATOR_DELETED' };
+export type SceneNarrationSnapshot = { workId: string; episodeId: string; episodeContentHash: string; layoutVersion: string; metadataVersion: string; hasStaleMetadata: boolean; characters: WorkContextReference[]; scenes: Array<{ identity: string; index: number; originalRange: SourceRange; locationHeading: string | null; preview: string; narration: SceneNarration }> };
+export type SaveSceneNarrationInput = { workId: string; episodeId: string; expectedEpisodeContentHash: string; expectedSceneLayoutVersion: string; expectedSceneIdentity: string; narration: { mode: NarrationMode; narratorCharacterId: string | null } };
 export type CanonResolution = { status: 'MATCHED' | 'NOT_FOUND' | 'AMBIGUOUS' | 'UNRESOLVED'; recordId: string | null; candidateIds: string[] };
 export type NotationOccurrence = { type: string; raw: string; range: SourceRange; quoteContext: string | null; canonType?: string; resolution?: CanonResolution };
 export type ReviewContext = {
-  scope: 'RELEVANT_CANON'; selectorVersion: 'RELEVANT_CANON_V2'; rangeUnit: 'UTF16_HALF_OPEN';
+  nameResolutionVersion: 'CHARACTER_NAMES_V1' | null;
+  nameMentions: Array<{ text: string; normalizedName: string; sceneIndex: number; sceneIdentity: string; range: SourceRange; quoteContext: string | null; status: 'MATCHED' | 'AMBIGUOUS'; recordId: string | null; candidateIds: string[]; certainty: 'REGISTERED_NAME_CANDIDATES'; candidates: Array<{ recordId: string; displayName: string; matchTypes: Array<'DISPLAY_NAME' | 'REGISTERED_ALIAS'>; organization: WorkContextReference | null }> }>;
+  sceneMetadata: Omit<SceneNarrationSnapshot, 'workId' | 'episodeId' | 'characters' | 'scenes'>;
+  scope: 'RELEVANT_CANON'; selectorVersion: 'RELEVANT_CANON_V2' | 'RELEVANT_CANON_V3'; rangeUnit: 'UTF16_HALF_OPEN';
   work: WorkContext['work']; episode: WorkContext['episode'];
-  scenes: Array<{ index: number; originalRange: SourceRange; locationHeading: string | null; timeHintRaw: string | null; locationCandidate: string | null; resolvedLocation: CanonResolution; narration: { type: 'CHARACTER' | 'EXTERNAL' | 'UNKNOWN'; characterId: string | null }; notationOccurrences: NotationOccurrence[]; directMentions: Array<CanonResolution & { name: string; range: SourceRange }>; selectedCanonIds: string[] }>;
+  scenes: Array<{ index: number; originalRange: SourceRange; locationHeading: string | null; timeHintRaw: string | null; locationCandidate: string | null; resolvedLocation: CanonResolution; identity: string; narration: SceneNarration; notationOccurrences: NotationOccurrence[]; directMentions: Array<CanonResolution & { name: string; range: SourceRange }>; selectedCanonIds: string[] }>;
   relevantCanon: { selectedSets: Array<{ key: string; label: string }>; selectedRecords: Array<WorkContext['canon']['sets'][number]['records'][number] & { setKey: string; setLabel: string }>; selectionReasons: Array<{ recordId: string; reason: string; sceneIndex: number; sourceRecordId: string | null; range: SourceRange | null }> };
   abilityOwnershipChecks: Array<{ raw: string; range: SourceRange; sceneIndex: number; type: string; abilityRecordId: string | null; actorCharacterId: string | null; result: 'MATCHED' | 'MISMATCH_CANDIDATE' | 'UNVERIFIABLE_OWNER' | 'CANON_NOT_FOUND' | 'AMBIGUOUS'; evidence: string; unresolvedReason: string | null }>;
   unresolvedMentions: Array<{ raw: string; range: SourceRange; sceneIndex: number; status: 'UNKNOWN' | 'AMBIGUOUS'; candidateIds: string[] }>;
@@ -117,15 +128,15 @@ export type ReviewRun = {
   episodeId: string;
   status: "RUNNING" | "COMPLETED" | "FAILED";
   processorKey: string;
-  source: { episodeContentHash: string; canonContextHash: string; contextMode: 'FULL_CANON_V1' | 'RELEVANT_CANON_V1'; fingerprintVersion: 'V1' | 'V2' };
-  freshness: { isCurrent: boolean; episodeChanged: boolean; canonChanged: boolean; contextChanged: boolean; canonComparison: 'COMPARABLE' | 'UNDETERMINED_EPISODE_CHANGED' };
+  source: { nameResolutionVersion: 'CHARACTER_NAMES_V1' | null; sceneMetadataHash: string | null; sceneMetadataVersion: string | null; episodeContentHash: string; canonContextHash: string; contextMode: 'FULL_CANON_V1' | 'RELEVANT_CANON_V1'; fingerprintVersion: 'V1' | 'V2' };
+  freshness: { sceneMetadataChanged: boolean; sceneMetadataComparison: 'CURRENT' | 'CHANGED' | 'LEGACY_NOT_TRACKED' | 'UNDETERMINED_EPISODE_CHANGED'; isCurrent: boolean; episodeChanged: boolean; canonChanged: boolean; contextChanged: boolean; canonComparison: 'COMPARABLE' | 'UNDETERMINED_EPISODE_CHANGED' };
   findings: ReviewFinding[];
   createdAt: string;
   startedAt: string;
   completedAt: string | null;
 };
 export type ReviewJobStatus = 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'RESUBMIT_REQUIRED';
-export type ReviewJob = { id: string; workId: string; episodeId: string; queueSequence: number; status: ReviewJobStatus; episodeContentHash: string; canonContextHash: string; contextMode: 'RELEVANT_CANON_V1'; fingerprintVersion: 'V2'; reviewRunId: string | null; errorCode: string | null; errorMessage: string | null; createdAt: string; startedAt: string | null; completedAt: string | null; workTitle: string; episodeNumber: number; episodeTitle: string };
+export type ReviewJob = { nameResolutionVersion: 'CHARACTER_NAMES_V1' | null; sceneMetadataHash: string | null; sceneMetadataVersion: string | null; id: string; workId: string; episodeId: string; queueSequence: number; status: ReviewJobStatus; episodeContentHash: string; canonContextHash: string; contextMode: 'RELEVANT_CANON_V1'; fingerprintVersion: 'V2'; reviewRunId: string | null; errorCode: string | null; errorMessage: string | null; createdAt: string; startedAt: string | null; completedAt: string | null; workTitle: string; episodeNumber: number; episodeTitle: string };
 export type ReviewQueue = { running: ReviewJob[]; queued: ReviewJob[]; recent: ReviewJob[] };
 
 export type CreateWorkInput = {
@@ -153,6 +164,10 @@ export type CreateEpisodeInput = {
 export type UpdateEpisodeInput = CreateEpisodeInput;
 
 export interface NovelCompanyApi {
+  sceneNarration: {
+    getForEpisode(input: { workId: string; episodeId: string }): Promise<IpcResult<SceneNarrationSnapshot>>;
+    save(input: SaveSceneNarrationInput): Promise<IpcResult<{ sceneIdentity: string; narration: SceneNarration }>>;
+  };
   works: {
     getAll(): Promise<IpcResult<StoredWork[]>>;
     getById(id: string): Promise<IpcResult<StoredWork | null>>;
@@ -177,6 +192,12 @@ export interface NovelCompanyApi {
     getNextAvailableNumber(workId: string): Promise<IpcResult<number>>;
   };
   canon: {
+    aliases: {
+      list(scope: CanonAliasScope): Promise<IpcResult<CanonAlias[]>>;
+      create(scope: CanonAliasScope, text: string): Promise<IpcResult<CanonAlias>>;
+      update(scope: CanonAliasScope, id: string, text: string): Promise<IpcResult<CanonAlias>>;
+      delete(scope: CanonAliasScope, id: string): Promise<IpcResult<{ id: string; recordId: string }>>;
+    };
     records: {
       getBySetId(scope: CanonScope): Promise<IpcResult<CanonRecordSummary[]>>;
       getById(scope: CanonScope, recordId: string): Promise<IpcResult<CanonRecord>>;

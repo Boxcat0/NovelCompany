@@ -577,6 +577,11 @@ h1 {
 .episode-counts { color: #627086; font-size: 14px; }
 
 .canon-authoring-group { margin-bottom: 20px; }
+.canon-alias-manager { margin-top: 20px; padding: 16px; border: 1px solid #bac6d6; border-radius: 8px; }
+.canon-alias-manager fieldset { border: 0; padding: 0; min-width: 0; }
+.canon-alias-manager label { display: block; margin: 12px 0 6px; font-weight: 600; }
+.canon-alias-manager input { width: 100%; padding: 9px; border: 1px solid #bac6d6; border-radius: 6px; font: inherit; }
+.canon-alias-manager button { margin: 6px 4px 6px 0; padding: 5px 8px; font: inherit; cursor: pointer; }
 .canon-authoring-group h3 { margin: 0 0 8px; font-size: 14px; color: #516783; }
 .canon-readiness { padding: 12px; border-radius: 8px; background: #f0f5fb; }
 .canon-readiness ul { padding-left: 18px; }

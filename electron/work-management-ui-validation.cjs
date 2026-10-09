@@ -251,6 +251,15 @@ async function runValidation() {
       return context;
     }));
     const contextRaceResult = await window.webContents.executeJavaScript('(' + exerciseEpisodes.toString() + ')("context-race")');
+    const narrationChannel = 'scene-narration:get-for-episode';
+    ipcMain.removeHandler(narrationChannel);
+    /** 첫 회차 POV 응답만 지연하여 새 회차 화면의 요청 순서 보호를 검증한다. */
+    ipcMain.handle(narrationChannel, (_event, input) => require('./ipc/ipc-action.cjs').executeIpcAction(narrationChannel, async () => {
+      const snapshot = await require('./context/scene-narration-service.cjs').getForEpisode(episodeStorage, input);
+      if (input.episodeId === queueEpisode.id) await new Promise(resolve => setTimeout(resolve, 600));
+      return snapshot;
+    }));
+    await window.webContents.executeJavaScript('(' + exerciseEpisodes.toString() + ')("narration-race")');
     const episodeScreenshotPath = path.join(artifactsRoot, "episode-editor.png");
     fs.writeFileSync(episodeScreenshotPath, (await window.webContents.capturePage()).toPNG());
     assert.deepEqual(getDatabase().prepare("PRAGMA foreign_key_check").all(), []);
@@ -274,7 +283,24 @@ async function runValidation() {
       return definition;
     }));
     const authoringRaceResult = await window.webContents.executeJavaScript("(" + exerciseCanonAuthoring.toString() + ")('race')");
-    const report = { contextRaceResult, queueUiResult, authoringResult, authoringRaceResult, authoringScreenshotPath, episodeResult, episodeScreenshotPath, result: "PASS", ...result, canonResult, deletionResult, persistence: "DB connection reopen + Renderer reload", screenshotPath, canonScreenshotPath, emptyScreenshotPath, deletionScreenshotPath, temporaryRoot, database: "isolated temporary DB" };
+    const { createAliasFixture } = require('./database/canon-alias-validation.cjs');
+    const aliasFixture = createAliasFixture('별칭 UI 작품');
+    const otherAliasFixture = createAliasFixture('다른 별칭 UI 작품');
+    require('./database/repositories/canon-alias-repository.cjs').create({ workId: otherAliasFixture.workId, recordId: otherAliasFixture.characters[0].id }, '다른 작품별칭');
+    require('./episode-service.cjs').createEpisodeWithContent(episodeStorage, { workId: aliasFixture.workId, episodeNumber: 1, title: 'Alias 후보', content: '"공통호칭!"' });
+    const { exerciseAliases } = require('./canon-alias-ui-validation.cjs');
+    const aliasUiResult = await window.webContents.executeJavaScript('(' + exerciseAliases.toString() + ')()');
+    const aliasChannel = 'canon:aliases:list'; ipcMain.removeHandler(aliasChannel);
+    /** A의 조회 응답만 지연하여 Character 및 Work 전환 후 데이터 혼합을 검사한다. */
+    ipcMain.handle(aliasChannel, (_event, scope) => require('./ipc/ipc-action.cjs').executeIpcAction(aliasChannel, async () => {
+      const result = require('./database/repositories/canon-alias-repository.cjs').list(scope);
+      if (scope.recordId === aliasFixture.characters[0].id) await new Promise(resolve => setTimeout(resolve, 600));
+      return result;
+    }));
+    const aliasRaceResult = await window.webContents.executeJavaScript('(' + exerciseAliases.toString() + ')("race")');
+    const aliasWorkRaceResult = await window.webContents.executeJavaScript('(' + exerciseAliases.toString() + ')("work-race")');
+    const aliasPreviewResult = await window.webContents.executeJavaScript('(' + exerciseAliases.toString() + ')("preview")');
+    const report = { aliasUiResult, aliasRaceResult, aliasWorkRaceResult, aliasPreviewResult, contextRaceResult, queueUiResult, authoringResult, authoringRaceResult, authoringScreenshotPath, episodeResult, episodeScreenshotPath, result: "PASS", ...result, canonResult, deletionResult, persistence: "DB connection reopen + Renderer reload", screenshotPath, canonScreenshotPath, emptyScreenshotPath, deletionScreenshotPath, temporaryRoot, database: "isolated temporary DB" };
     fs.writeFileSync(path.join(artifactsRoot, "result.json"), JSON.stringify(report, null, 2));
     console.log(JSON.stringify(report));
   } catch (error) {

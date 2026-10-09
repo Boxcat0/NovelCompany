@@ -113,10 +113,10 @@ function validateAuthoringMigration(root) {
   assert.deepEqual(repository.getById(scope.world, saved.id), saved);
   assert.deepEqual(repository.getById(scope.character, character.id), character);
   assert.deepEqual(valueTables.map((table) => migrated.prepare("SELECT * FROM " + table + " ORDER BY rowid").all()), recordsBefore);
-  assert.equal(migrated.prepare("SELECT COUNT(*) n FROM schema_migrations").get().n, 10);
+  assert.equal(migrated.prepare("SELECT COUNT(*) n FROM schema_migrations").get().n, 12);
   const backups = fs.readdirSync(path.join(path.dirname(file), "backups")); assert.equal(backups.length, 1);
   const backup = new DatabaseSync(path.join(path.dirname(file), "backups", backups[0]), { readOnly: true });
-  try { assert.equal(backup.prepare("SELECT COUNT(*) n FROM schema_migrations").get().n, 9); assert.equal(backup.prepare("SELECT required FROM canon_fields WHERE canon_set_id = ? AND key = 'origin_world'").get(scope.character.setId).required, 1); } finally { backup.close(); }
+  try { assert.equal(backup.prepare("SELECT COUNT(*) n FROM schema_migrations").get().n, 11); assert.equal(backup.prepare("SELECT required FROM canon_fields WHERE canon_set_id = ? AND key = 'origin_world'").get(scope.character.setId).required, 1); } finally { backup.close(); }
   closeDatabase(); initializeDatabase(file); closeDatabase();
   assert.equal(fs.readdirSync(path.join(path.dirname(file), "backups")).length, 1);
   const failFile = path.join(root, "task022-backup-failure", "novelcompany.db");

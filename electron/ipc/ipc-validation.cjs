@@ -334,6 +334,17 @@ async function runValidation() {
     assert.equal("ipcRenderer" in api, false);
 
     const runtimePreloadApi = loadRuntimePreloadApiForValidation();
+    assert.deepEqual(Object.keys(runtimePreloadApi.sceneNarration), ['getForEpisode', 'save']);
+    const narrationInput = { workId: work.id, episodeId: episode.id };
+    assert.equal((await runtimePreloadApi.sceneNarration.getForEpisode(narrationInput)).data.channel, IPC_CHANNELS.SCENE_NARRATION_GET_FOR_EPISODE);
+    assert.equal((await runtimePreloadApi.sceneNarration.save(narrationInput)).data.channel, IPC_CHANNELS.SCENE_NARRATION_SAVE);
+    const narrationSnapshot = await ipcMain.handlers.get(IPC_CHANNELS.SCENE_NARRATION_GET_FOR_EPISODE)(null, narrationInput);
+    assert.equal(narrationSnapshot.ok, true);
+    assert.equal('storageKey' in narrationSnapshot.data, false);
+    const narrationScene = narrationSnapshot.data.scenes[0];
+    const narrationSaved = await ipcMain.handlers.get(IPC_CHANNELS.SCENE_NARRATION_SAVE)(null, { ...narrationInput, expectedEpisodeContentHash: narrationSnapshot.data.episodeContentHash, expectedSceneLayoutVersion: narrationSnapshot.data.layoutVersion, expectedSceneIdentity: narrationScene.identity, narration: { mode: 'UNKNOWN', narratorCharacterId: null } });
+    assert.equal(narrationSaved.ok, true);
+    assert.equal(narrationSaved.data.narration.source, 'AUTHOR_SET');
     assert.deepEqual(Object.keys(runtimePreloadApi.works), [
       "getAll",
       "getById",
@@ -410,6 +421,7 @@ async function runValidation() {
     );
 
     await validateCanonRecordIpc(ipcMain, runtimePreloadApi);
+    await require('../database/canon-alias-validation.cjs').validateAliasIpc(ipcMain, runtimePreloadApi);
     await validateWorkManagementIpc(ipcMain, runtimePreloadApi);
     await require("../database/canon-space-validation.cjs").validateCanonSpaceIpc(ipcMain, runtimePreloadApi);
     await require("../database/canon-deletion-validation.cjs").validateCanonDeletionIpc(ipcMain, runtimePreloadApi);

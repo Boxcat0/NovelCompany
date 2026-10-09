@@ -1,5 +1,25 @@
 # NovelCompany 개발 계획
 
+## Task028 — Character Alias Management & Name Resolution
+
+저장된 Character의 선택적 Alias CRUD, Character별 NFC 중복 방지, 다른 Character의 동일 별칭 허용을 구현했다. Work/CanonSpace/character 범위 검증과 cascade 삭제를 적용한다. 기존 Dynamic Form을 유지하고 별칭 작업으로 Character draft가 사라지지 않게 하며 Character/Work 전환의 지연 응답을 폐기한다.
+
+정식 이름/등록 Alias의 결정적 후보 탐지, 긴 명칭 우선과 조사 경계, 원문 UTF-16 범위, AMBIGUOUS 후보 전체와 실제 Organization 참조를 ReviewContext/Preview에 제공한다. 등록 후보가 하나여도 실제 발화 대상 판정으로 표시하지 않는다. Scene Parser/Narration과 Skill ownership의 기존 의미는 유지한다.
+
+Selector V3와 CHARACTER_NAMES_V1을 신규 Canon 해시에 반영하고 과거 V1/V2 이름 탐지 경로를 재현한다. Episode에 영향 없는 Alias 변경은 stale을 만들지 않는다. Canon Alias 편집은 Episode 잠금과 독립적이며 Worker는 제출 입력을 재검증한다. `test:canon-alias`는 임시 DB/Storage에서 CRUD·scope·해석·소속·hash·Legacy·Queue·삭제·migration 백업/실패/보존을 검사한다. `test:work-ui`는 실제 sandbox Renderer에서 Alias CRUD·중복 정책·draft 보존·Character/Work race·모호성 Preview와 STUB_V1을 검증한다.
+
+Speaker/실제 지시 대상/Skill 사용자의 문맥 추론과 Organization·관계·Scene 정보를 활용한 판정은 향후 AI 통합 단계다. 이번 Task는 외부 AI 호출과 추측의 Canon 자동 저장을 구현하지 않는다.
+
+## Task027 — Scene Narration Metadata & POV Management
+
+작가가 저장된 장면별로 특정 인물 1인칭, 외부 3인칭, 미확정을 지정한다. 동일 Work Character ID만 연결하며 UNKNOWN 상태도 검토 제출을 허용한다. 미저장 원고 및 QUEUED/RUNNING 회차에서는 시점 편집을 막는다. 원고/파서 버전 변경 시 기존 Metadata를 보존하되 자동 재연결하지 않고 재확인 안내를 표시한다.
+
+Migration 011, Scene API/UI, ReviewContext DTO, 독립 scene fingerprint와 Job/Run freshness를 연결했다. Character/Canon 삭제 시 참조를 UNKNOWN으로 무효화한다. 기존 Ownership Validation과 Relevant Canon 선택은 유지한다. AI 호출과 자동 화자 추론은 구현하지 않는다.
+
+검증 명령 `npm run test:scene-narration`은 격리 임시 DB/Storage에서 모드·참조 범위·재시작·버전 안전성·ownership 회귀·fingerprint·freshness·잠금 경합·Queue 입력 비교·Canon lifecycle·migration 백업 및 기존 Run/Job 보존을 확인한다. 기존 DB/Repository/IPC/Context/Review/Queue/UI 검증도 유지한다. Electron UI 검증에 dirty POV 차단, 시점 저장, QUEUED 편집 차단과 지연 응답 폐기를 포함한다.
+
+후속 후보는 실제 AI Reviewer가 작가 지정 POV를 보조 근거로 사용하는 과정, 대사 화자/능력 사용자 추론과 확실성 관리, 추론 후 Character.attributes와 Skill.required_attribute 비교다. 추론을 Canon 사실로 저장하거나 Narrator만으로 사용자를 확정하지 않는다.
+
 ## Task026 — Review Submission & Persistent FIFO Queue
 
 - ReviewJob 영속 접수, 순번 기반 FIFO, 전역 단일 RUNNING, ReviewRun 원자적 연결·종료.

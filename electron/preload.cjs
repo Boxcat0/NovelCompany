@@ -137,6 +137,12 @@ function getCanonSetDefinition(setId) {
  */
 function exposeNovelCompanyApi() {
   contextBridge.exposeInMainWorld("novelCompany", {
+    sceneNarration: {
+      /** 저장된 장면 목록과 지정 시점을 요청한다. */
+      getForEpisode: (input) => ipcRenderer.invoke('scene-narration:get-for-episode', input),
+      /** 작가가 지정한 장면 시점을 조건부로 저장한다. */
+      save: (input) => ipcRenderer.invoke('scene-narration:save', input),
+    },
     works: {
       getAll: getAllWorks,
       getById: getWorkById,
@@ -155,6 +161,16 @@ function exposeNovelCompanyApi() {
       getNextAvailableNumber: getNextAvailableEpisodeNumber,
     },
     canon: {
+      aliases: {
+        /** 현재 작품 Character의 별칭만 조회한다. */
+        list: (scope) => ipcRenderer.invoke('canon:aliases:list', scope),
+        /** 저장된 Character에 별칭을 등록한다. */
+        create: (scope, text) => ipcRenderer.invoke('canon:aliases:create', scope, text),
+        /** 해당 Character의 별칭만 수정한다. */
+        update: (scope, id, text) => ipcRenderer.invoke('canon:aliases:update', scope, id, text),
+        /** 해당 Character를 보존하며 별칭만 삭제한다. */
+        delete: (scope, id) => ipcRenderer.invoke('canon:aliases:delete', scope, id),
+      },
       records: {
         getBySetId: getCanonRecordsBySetId,
         getById: getCanonRecordById,

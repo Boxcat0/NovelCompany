@@ -1,4 +1,10 @@
 const IPC_CHANNELS = Object.freeze({
+  CANON_ALIAS_LIST: 'canon:aliases:list',
+  CANON_ALIAS_CREATE: 'canon:aliases:create',
+  CANON_ALIAS_UPDATE: 'canon:aliases:update',
+  CANON_ALIAS_DELETE: 'canon:aliases:delete',
+  SCENE_NARRATION_GET_FOR_EPISODE: "scene-narration:get-for-episode",
+  SCENE_NARRATION_SAVE: "scene-narration:save",
   WORK_GET_ALL: "works:get-all",
   WORK_GET_BY_ID: "works:get-by-id",
   WORK_CREATE: "works:create",

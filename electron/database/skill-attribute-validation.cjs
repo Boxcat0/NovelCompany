@@ -54,7 +54,7 @@ async function validateCurrent(root) {
   assert.equal(contextBefore.relevantCanon.selectedRecords.find(item => item.id === wave.id).fields.find(item => item.key === 'required_attribute').value.recordId, water.id);
   assert.ok(contextBefore.relevantCanon.selectedRecords.some(item => item.id === water.id));
   assert.ok(contextBefore.relevantCanon.selectionReasons.some(item => item.reason === 'SKILL_REQUIRED_ATTRIBUTE' && item.recordId === water.id));
-  const oldV1Hash = buildRelevantCanonHash(contextBefore, 'V1');
+  const oldV1Hash = buildRelevantCanonHash(buildReviewContext(await buildEpisodeWorkContext(storage, input), [], null), 'V1');
   const full = await buildEpisodeWorkContext(storage, input);
   const oldRun = reviewRepository.createRun({ workId, episodeId: episode.id, processorKey: 'STUB_V1', episodeContentHash: buildEpisodeContentHash(full), canonContextHash: oldV1Hash, contextMode: 'RELEVANT_CANON_V1' });
   reviewRepository.completeRun(oldRun.id, []);
@@ -66,7 +66,7 @@ async function validateCurrent(root) {
   assert.equal(contextAfter.relevantCanon.selectedRecords.find(item => item.id === wave.id).fields.find(item => item.key === 'required_attribute').value.recordId, fire.id);
   assert.ok(contextAfter.relevantCanon.selectedRecords.some(item => item.id === fire.id));
   assert.notEqual(buildRelevantCanonHash(contextBefore), buildRelevantCanonHash(contextAfter));
-  assert.equal(buildRelevantCanonHash(contextAfter, 'V1'), oldV1Hash);
+  assert.equal(buildRelevantCanonHash(buildReviewContext(await buildEpisodeWorkContext(storage, input), [], null), 'V1'), oldV1Hash);
   const history = await getReviewsByEpisode(storage, input);
   assert.equal(history.find(item => item.id === oldRun.id).freshness.isCurrent, true);
   assert.equal(history.find(item => item.id === newRun.id).freshness.canonChanged, true);
@@ -89,7 +89,7 @@ function validateUpgrade(root) {
   closeDatabase();
   initializeDatabase(file);
   const upgraded = getDatabase();
-  assert.equal(upgraded.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count, 10);
+  assert.equal(upgraded.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count, 12);
   const newField = getCanonDefinitionBySetId(scope.skill.setId).fields.find(item => item.key === 'required_attribute');
   assert.equal(newField.referenceSet.id, scope.attribute.setId);
   assert.deepEqual(upgraded.prepare('SELECT * FROM canon_records WHERE id = ?').get(oldSkill.id), recordBefore);
@@ -129,7 +129,7 @@ function validateBackupFailure(root) {
   assert.throws(() => initializeDatabase(file));
   const readonly = new DatabaseSync(file, { readOnly: true });
   try {
-    assert.equal(readonly.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count, 8);
+    assert.equal(readonly.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count, 10);
     assert.equal(readonly.prepare("SELECT COUNT(*) count FROM canon_fields WHERE canon_set_id = ? AND key = 'required_attribute'").get(scope.skill.setId).count, 0);
   } finally { readonly.close(); }
 }

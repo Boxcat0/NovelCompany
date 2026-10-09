@@ -5,6 +5,12 @@ const { IPC_CHANNELS } = require("./ipc-channels.cjs");
  */
 function createNovelCompanyApi(ipcRenderer) {
   return {
+    sceneNarration: {
+      /** 저장된 원고의 장면과 작가 지정 시점을 읽는다. */
+      getForEpisode: (input) => ipcRenderer.invoke(IPC_CHANNELS.SCENE_NARRATION_GET_FOR_EPISODE, input),
+      /** 원고와 장면 식별자를 재검증하여 시점을 저장한다. */
+      save: (input) => ipcRenderer.invoke(IPC_CHANNELS.SCENE_NARRATION_SAVE, input),
+    },
     works: {
       getAll: () => ipcRenderer.invoke(IPC_CHANNELS.WORK_GET_ALL),
       getById: (id) => ipcRenderer.invoke(IPC_CHANNELS.WORK_GET_BY_ID, id),
@@ -33,6 +39,16 @@ function createNovelCompanyApi(ipcRenderer) {
         ipcRenderer.invoke(IPC_CHANNELS.EPISODE_READ_CONTENT, episodeId),
     },
     canon: {
+      aliases: {
+        /** 현재 작품 Character의 별칭만 조회한다. */
+        list: (scope) => ipcRenderer.invoke(IPC_CHANNELS.CANON_ALIAS_LIST, scope),
+        /** 저장된 Character에 작가가 입력한 별칭을 등록한다. */
+        create: (scope, text) => ipcRenderer.invoke(IPC_CHANNELS.CANON_ALIAS_CREATE, scope, text),
+        /** 지정 Character에 속한 별칭을 수정한다. */
+        update: (scope, id, text) => ipcRenderer.invoke(IPC_CHANNELS.CANON_ALIAS_UPDATE, scope, id, text),
+        /** Character를 보존하면서 별칭만 삭제한다. */
+        delete: (scope, id) => ipcRenderer.invoke(IPC_CHANNELS.CANON_ALIAS_DELETE, scope, id),
+      },
       records: {
         /** 검증용 bridge에서 목록 조회 인자를 전달한다. */
         getBySetId: (scope) => ipcRenderer.invoke(IPC_CHANNELS.CANON_RECORD_GET_BY_SET_ID, scope),

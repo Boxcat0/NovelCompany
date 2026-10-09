@@ -48,9 +48,20 @@ async function exerciseEpisodes(mode = "normal") {
       return { staleReadIgnored: true };
     }
     await waitFor(() => document.getElementById("episode-content"), "loaded manuscript");
+    if (mode === 'narration-race') {
+      await waitFor(() => document.querySelector('[aria-label="장면 시점 설정"]')?.textContent.includes('불러오는 중'), 'POV pending');
+      episode(4).click();
+      await waitFor(() => document.getElementById('episode-number')?.value === '4' && document.querySelector('[aria-label="장면 시점 설정"] select'), 'Latest POV loaded');
+      await new Promise(resolve => setTimeout(resolve, 700));
+      check(!document.querySelector('[aria-label="장면 시점 설정"]').textContent.includes('재시작 원고'), 'Old POV response leaked');
+      check(document.querySelector('[aria-label="장면 시점 설정"] select').value === 'UNKNOWN', 'Old POV replaced current scene');
+      return { staleNarrationIgnored: true };
+    }
     if (mode === 'queue-ui') {
       await waitFor(() => document.querySelector('[aria-label="검토"]')?.textContent.includes('제출 상태: 대기 중'), 'Queued Job visible');
       check(document.querySelector('.episode-editor fieldset').disabled, 'Queued Episode editor remained enabled');
+      await waitFor(() => document.querySelector('[aria-label="장면 시점 설정"] fieldset'), 'Queued POV loaded');
+      check(document.querySelector('[aria-label="장면 시점 설정"] fieldset').disabled, 'Queued POV enabled');
       check(button('검토부에 제출')?.disabled && !button('제출 철회')?.disabled, 'Queued buttons invalid');
       check(document.querySelector('[aria-label="검토"]')?.textContent.includes('대기 순서 1'), 'Queue position missing');
       const work = (await window.novelCompany.works.getAll()).data.find(item => item.title === '회차 UI 작품');
@@ -98,10 +109,19 @@ async function exerciseEpisodes(mode = "normal") {
   await create(3);
   episode(2).click(); await waitFor(() => document.getElementById("episode-number")?.value === "2", "select 2");
   await fill("episode-content", '[헤븐즈]\n나는 {미등록 능력}을 사용했다. 그분\n[알림 : 내용]');
+  await waitFor(() => document.querySelector('[aria-label="장면 시점 설정"]')?.textContent.includes('먼저 원고를 저장'), 'Dirty POV notice');
+  check([...document.querySelectorAll('[aria-label="장면 시점 설정"] fieldset')].every(field => field.disabled), 'Dirty POV controls enabled');
   await waitFor(() => button("검토부에 제출")?.disabled && document.body.textContent.includes('미저장 변경사항을 저장한 뒤 제출'), "dirty review block");
   click("작업 컨텍스트 확인");
   await waitFor(() => document.body.textContent.includes("저장되지 않은 원고가 있습니다."), "dirty context block");
   await save();
+  await waitFor(() => document.querySelector('[aria-label="장면 시점 설정"] select'), 'POV scene list');
+  const narrationSelect = document.querySelector('[aria-label="장면 시점 설정"] select');
+  Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(narrationSelect, 'EXTERNAL_THIRD_PERSON');
+  narrationSelect.dispatchEvent(new Event('change', { bubbles: true }));
+  await waitFor(() => button('검토부에 제출').disabled, 'Unsaved POV submission guard');
+  click('시점 저장');
+  await waitFor(() => document.querySelector('[aria-label="장면 시점 설정"]')?.textContent.includes('작가 지정') && !button('시점 저장').disabled, 'POV saved');
   click("작업 컨텍스트 확인");
   await waitFor(() => document.body.textContent.includes("이 작품에는 시작된 Canon이 없습니다."), "context IPC failure");
   const reviewWork = (await window.novelCompany.works.getAll()).data.find((item) => item.title === "회차 UI 작품");

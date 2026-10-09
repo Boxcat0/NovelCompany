@@ -8,10 +8,10 @@ const { logIpcError } = require('../logging/logger.cjs');
 let activeWorker = null;
 
 /** 검증된 WorkContext의 원고·관련 Canon 해시를 제출 기준으로 고정한다. */
-function submissionSource(workContext) {
-  const source = buildCurrentSource(workContext);
+function submissionSource(workContext, nameResolutionVersion) {
+  const source = buildCurrentSource(workContext, nameResolutionVersion);
   return { episodeContentHash: source.episodeContentHash, canonContextHash: source.canonContextHash,
-    contextMode: 'RELEVANT_CANON_V1', fingerprintVersion: 'V2', reviewContext: source.reviewContext };
+    contextMode: 'RELEVANT_CANON_V1', fingerprintVersion: 'V2', nameResolutionVersion: source.nameResolutionVersion, sceneMetadataHash: source.sceneMetadataHash, sceneMetadataVersion: source.sceneMetadataVersion, reviewContext: source.reviewContext };
 }
 
 /** 한 Main 프로세스에서 FIFO 작업을 직렬 실행하고 Job 상태를 SQLite에 보존한다. */
@@ -82,15 +82,16 @@ function createReviewQueue(episodeStorage, processorFactory = createStubReviewPr
   async function processJob(job) {
     let source;
     try {
-      source = submissionSource(await buildEpisodeWorkContext(episodeStorage, { workId: job.workId, episodeId: job.episodeId }));
+      source = submissionSource(await buildEpisodeWorkContext(episodeStorage, { workId: job.workId, episodeId: job.episodeId }), job.nameResolutionVersion ?? null);
     } catch (cause) {
       const changed = cause instanceof RepositoryError && cause.code === 'EPISODE_CONTENT_HASH_MISMATCH';
       if (!changed) logIpcError({ channel: 'reviews:worker', code: 'CONTEXT_BUILD_FAILED', message: '검토 입력을 읽지 못했습니다.', cause });
       jobs.finishQueued(job.id, changed ? 'RESUBMIT_REQUIRED' : 'FAILED', changed ? 'REVIEW_INPUT_CHANGED' : cause instanceof RepositoryError ? cause.code : 'CONTEXT_BUILD_FAILED', changed ? '제출 후 원고가 변경되었습니다. 저장 상태를 확인한 뒤 다시 제출해 주세요.' : '검토 입력을 읽지 못했습니다. 원고와 Canon을 확인해 주세요.');
       return;
     }
-    if (source.episodeContentHash !== job.episodeContentHash || source.canonContextHash !== job.canonContextHash || source.contextMode !== job.contextMode || source.fingerprintVersion !== job.fingerprintVersion) {
-      jobs.finishQueued(job.id, 'RESUBMIT_REQUIRED', 'REVIEW_INPUT_CHANGED', '제출 후 원고 또는 관련 Canon이 변경되었습니다. 다시 제출해 주세요.');
+    // 장면 입력을 기록하지 않은 과거 QUEUED Job도 새 입력으로 조용히 실행하지 않는다.
+    if (source.episodeContentHash !== job.episodeContentHash || source.canonContextHash !== job.canonContextHash || source.contextMode !== job.contextMode || source.fingerprintVersion !== job.fingerprintVersion || source.nameResolutionVersion !== job.nameResolutionVersion || source.sceneMetadataHash !== job.sceneMetadataHash || source.sceneMetadataVersion !== job.sceneMetadataVersion) {
+      jobs.finishQueued(job.id, 'RESUBMIT_REQUIRED', !job.sceneMetadataHash ? 'REVIEW_SCENE_METADATA_NOT_TRACKED' : 'REVIEW_INPUT_CHANGED', '제출 기준 원고·Canon·장면 시점이 현재 입력과 다릅니다. 다시 제출해 주세요.');
       return;
     }
     const processor = processorFactory();

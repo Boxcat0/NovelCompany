@@ -21,6 +21,8 @@
     "setup:current-work-canon": "node electron/database/setup/install-current-work-canon.cjs",
     "test:review-context": "node electron/context/review-context-validation.cjs",
     "test:skill-attribute": "node electron/database/skill-attribute-validation.cjs",
+    "test:canon-alias": "node electron/database/canon-alias-validation.cjs",
+    "test:scene-narration": "node electron/context/scene-narration-validation.cjs",
     "test:review-queue": "node electron/review/review-queue-validation.cjs"
   },
   "build": {

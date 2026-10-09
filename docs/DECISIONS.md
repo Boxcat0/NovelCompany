@@ -1,5 +1,28 @@
 # NovelCompany 아키텍처 결정 기록
 
+## Task028 — 별칭은 등록 후보이며 실제 지시 대상은 미확정
+
+- Character Record와 Alias는 1:N이며 먼저 저장된 Generic character에서만 CRUD한다. 동일 Record 내 normalized Alias는 UNIQUE, 다른 Record끼리 같은 Alias와 다른 Character의 정식 이름 충돌은 허용한다.
+- 표시 값은 앞뒤 공백만 제거해 저장한다. 비교 값은 trim + Unicode NFC이며 내부 공백과 대소문자는 유지한다. 제어문자·줄바꿈·빈 값 및 200자를 넘는 입력은 거부한다. 동일 Character의 현재 정식 이름과 같은 Alias는 생성/수정하지 않는다. 이후 Character 이름 변경은 기존 정책대로 허용하고 같은 이름/Alias의 후보를 Record ID로 중복 제거한다.
+- 긴 명칭 우선, 보수적인 단어/조사 경계와 원래 UTF-16 범위를 사용한다. NFC 검색 view를 만들지만 원고 TXT를 정규화하거나 수정하지 않는다. 형태소 분석기와 외부 API를 도입하지 않는다.
+- 동일 명칭의 후보를 모두 보존한다. 각 후보는 DISPLAY_NAME/REGISTERED_ALIAS evidence와 기존 Character.organization 참조를 가진다. 소속 미설정은 null이며 Organization으로 후보를 자동 확정하지 않는다. 문맥 의존 대명사는 등록 여부와 관계없이 unresolved다.
+- 단일 후보는 기존 Relevant Canon 1-hop 확장에 연결한다. AMBIGUOUS 후보의 Skill/Passive/관계/계약을 전부 확장하지 않는다. 명칭 후보 탐지와 실제 발화 대상·능력 사용자 판정은 분리한다. 기존 ownership 규칙은 Alias를 읽지 않는다.
+- Alias-aware 해시 입력은 selector V3 + CHARACTER_NAMES_V1 + 기존 관련 Canon + 실제 nameMentions다. Alias 전체 목록·DB UUID·timestamp를 해시하지 않는다. 원고와 무관한 Alias 변경은 stale을 만들지 않는다. 모호한 후보의 Organization 변경도 실제 후보 입력에 반영한다.
+- Migration 012는 기존 Canon V1/V2 컬럼을 유지하고 Job/Run에 nullable name_resolution_version을 추가한다. null은 과거 파서/hash 경로, CHARACTER_NAMES_V1은 신규 selector/hash 경로다. 과거 hash는 backfill/재작성하지 않으며 Scene Narration V1 hash도 변경하지 않는다.
+- Alias는 Canon 데이터이므로 Episode 잠금을 적용하지 않는다. QUEUED 입력 불일치는 기존 Worker 비교로 재제출 필요, RUNNING 입력은 고정하고 완료 결과 freshness로 변경을 표시한다. FK CASCADE는 Character/Canon 삭제 transaction 안에서 Alias를 정리하고 실패하면 함께 rollback한다.
+- 향후 AI Reviewer는 Speaker·Organization·관계·POV·Scene 문맥을 추가 근거로 사용해 실제 지시 대상을 추론할 수 있다. 추론을 Canon 사실로 자동 저장하지 않는다.
+
+## Task027 — POV는 작가 지정 보조 Metadata
+
+- TXT를 Source of Truth로 유지하며 POV 태그를 삽입하지 않는다. 장면 경계는 Task025 파서만 사용하고 독립 버전 `SCENE_LAYOUT_V1`을 부여한다.
+- Episode ID + 원문 SHA-256 + layout version + scene identity를 연결 키로 사용한다. identity는 version/index/UTF-16 range/raw heading/장면 원문 hash의 canonical SHA-256이다. 원고·파서가 바뀌면 예전 행은 보존하고 자동 재매칭하지 않는다. 정확히 같은 원고·파서로 되돌아온 경우에만 같은 키의 설정을 읽는다.
+- `FIRST_PERSON_CHARACTER`는 동일 Work Generic character 하나를 요구한다. 외부 3인칭과 UNKNOWN은 참조가 없다. `AUTHOR_SET`과 `UNSET`을 구분하고 UNKNOWN도 제출 가능하다.
+- Character 삭제는 trigger에서 참조를 null, 모드를 UNKNOWN, invalidated를 1로 바꾼다. 삭제 행의 이름이나 다른 인물로 대체하지 않는다. Canon 전체 삭제와 재시작을 막지 않으며 transaction 실패 시 무효화도 rollback된다.
+- 시점 쓰기는 Task026 operation gate와 QUEUED/RUNNING 잠금을 재사용한다. Canon 삭제에 따른 참조 무효화는 Canon lifecycle 작업으로 허용한다. 실행 전 hash가 달라지면 RESUBMIT_REQUIRED다.
+- Scene hash는 Canon hash와 분리한다. metadata/layout version과 순서가 고정된 장면 identity/mode/source/narrator identity/status만 canonical serialization한다. narrator identity의 displayName도 실제 Review 입력이므로 포함한다. 행 UUID·시각·구버전 경고 여부는 제외한다.
+- 과거 Run의 null hash/version은 LEGACY_NOT_TRACKED이며 기존 FULL/RELEVANT V1/V2 판정을 유지한다. 과거 QUEUED Job은 제출 시점 POV를 재현할 수 없어 RESUBMIT_REQUIRED로 끝낸다. 기존 hash는 덮어쓰지 않는다. Episode가 바뀌면 POV의 독립 변경을 단정하지 않고 UNDETERMINED_EPISODE_CHANGED로 표시한다.
+- Narrator로 대사 화자나 Skill 사용자를 자동 판정하지 않는다. AI 호출, Canon 자동 수정, Relevant Canon 확장, 실제 Review Processor는 이번 범위 밖이다.
+
 ## Task026 — 제출과 실행의 분리
 
 작가의 제출은 영속 ReviewJob이고 실제 Processor 실행은 기존 ReviewRun이다. `review_jobs.queue_sequence`를 SQLite AUTOINCREMENT로 배정해 같은 밀리초 제출도 FIFO로 처리한다. Episode 활성 Job과 전역 RUNNING Job은 각각 partial unique index로 한 개만 허용한다. 별도 Episode lock boolean은 저장하지 않는다. 취소는 QUEUED에서만 조건부 UPDATE하고 이력을 삭제하지 않는다.

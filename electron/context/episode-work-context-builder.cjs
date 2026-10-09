@@ -181,13 +181,15 @@ function loadCanonContext(workId) {
   });
 
   const recordIndex = buildRecordIndex(setContexts);
+  const aliases = require('../database/repositories/canon-alias-repository.cjs').loadForWork(workId);
   const sets = setContexts.map((setContext) => ({
     key: setContext.definition.key,
     label: setContext.definition.name,
     recordCount: setContext.records.length,
-    records: setContext.records.map((record) =>
-      hydrateCanonRecord(record, setContext.definition, recordIndex),
-    ),
+    records: setContext.records.map((record) => ({
+      ...hydrateCanonRecord(record, setContext.definition, recordIndex),
+      ...(setContext.definition.key === 'character' ? { registeredAliases: aliases.get(record.id) ?? [] } : {}),
+    })),
   }));
 
   return {
@@ -256,6 +258,8 @@ async function buildEpisodeWorkContext(episodeStorage, input) {
 }
 
 module.exports = {
+  readSavedEpisodeContent,
+  verifyEpisodeContentHash,
   buildEpisodeWorkContext,
   buildRecordIndex,
   hydrateCanonRecord,

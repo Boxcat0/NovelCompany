@@ -9,6 +9,8 @@ function toJob(row) {
     queueSequence: row.queue_sequence, status: row.status,
     episodeContentHash: row.episode_content_hash, canonContextHash: row.canon_context_hash,
     contextMode: row.context_mode, fingerprintVersion: row.fingerprint_version,
+    nameResolutionVersion: row.name_resolution_version,
+    sceneMetadataHash: row.scene_metadata_hash, sceneMetadataVersion: row.scene_metadata_version,
     reviewRunId: row.review_run_id, errorCode: row.error_code, errorMessage: row.error_message,
     createdAt: row.created_at, startedAt: row.started_at, completedAt: row.completed_at,
     workTitle: row.work_title, episodeNumber: row.episode_number, episodeTitle: row.episode_title };
@@ -54,8 +56,8 @@ function submit(input) {
   const id = randomUUID();
   const now = new Date().toISOString();
   try {
-    database.prepare("INSERT INTO review_jobs (id, work_id, episode_id, status, episode_content_hash, canon_context_hash, context_mode, fingerprint_version, created_at) VALUES (?, ?, ?, 'QUEUED', ?, ?, 'RELEVANT_CANON_V1', 'V2', ?)")
-      .run(id, input.workId, input.episodeId, input.episodeContentHash, input.canonContextHash, now);
+    database.prepare("INSERT INTO review_jobs (id, work_id, episode_id, status, episode_content_hash, canon_context_hash, context_mode, fingerprint_version, created_at, scene_metadata_hash, scene_metadata_version, name_resolution_version) VALUES (?, ?, ?, 'QUEUED', ?, ?, 'RELEVANT_CANON_V1', 'V2', ?, ?, ?, ?)")
+      .run(id, input.workId, input.episodeId, input.episodeContentHash, input.canonContextHash, now, input.sceneMetadataHash ?? null, input.sceneMetadataVersion ?? null, input.nameResolutionVersion ?? null);
   } catch (cause) {
     if (String(cause?.message).includes('UNIQUE constraint failed')) throw new RepositoryError('REVIEW_JOB_ALREADY_ACTIVE', '이 회차는 이미 검토 대기 중이거나 진행 중입니다.', cause);
     throw new RepositoryError('REVIEW_SUBMIT_FAILED', '검토부 제출을 저장하지 못했습니다.', cause);
@@ -92,8 +94,8 @@ function claimWithRun(id, processorKey) {
     if (database.prepare("SELECT 1 FROM review_jobs WHERE status = 'RUNNING' LIMIT 1").get()) { database.exec('ROLLBACK'); return null; }
     const runId = randomUUID();
     const now = new Date().toISOString();
-    database.prepare("INSERT INTO review_runs (id, work_id, episode_id, status, processor_key, episode_content_hash, canon_context_hash, context_mode, fingerprint_version, created_at, started_at) VALUES (?, ?, ?, 'RUNNING', ?, ?, ?, ?, ?, ?, ?)")
-      .run(runId, job.work_id, job.episode_id, processorKey, job.episode_content_hash, job.canon_context_hash, job.context_mode, job.fingerprint_version, now, now);
+    database.prepare("INSERT INTO review_runs (id, work_id, episode_id, status, processor_key, episode_content_hash, canon_context_hash, context_mode, fingerprint_version, created_at, started_at, scene_metadata_hash, scene_metadata_version, name_resolution_version) VALUES (?, ?, ?, 'RUNNING', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(runId, job.work_id, job.episode_id, processorKey, job.episode_content_hash, job.canon_context_hash, job.context_mode, job.fingerprint_version, now, now, job.scene_metadata_hash, job.scene_metadata_version, job.name_resolution_version);
     const updated = database.prepare("UPDATE review_jobs SET status = 'RUNNING', review_run_id = ?, started_at = ? WHERE id = ? AND status = 'QUEUED'").run(runId, now, id);
     if (updated.changes !== 1) throw new Error('ReviewJob claim lost');
     database.exec('COMMIT');

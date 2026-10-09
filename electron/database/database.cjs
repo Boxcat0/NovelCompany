@@ -36,11 +36,13 @@ function initializeDatabase(databasePath = getDatabaseFilePath()) {
     const needsSkillAttribute = hasMigrations && connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 3").get() && !connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 8").get();
     const needsFingerprintVersion = hasMigrations && connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 7").get() && !connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 9").get();
     const needsReviewJobs = hasMigrations && connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 9").get() && !connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 10").get();
+    const needsSceneNarration = hasMigrations && connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 10").get() && !connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 11").get();
     const skillTargets = needsSkillAttribute ? inspectSkillAttributeUpgrade(connection) : [];
-    if (needsTask017 || needsTask022 || needsTask024 || needsSkillAttribute || needsFingerprintVersion || needsReviewJobs) {
+    const needsAliases = hasMigrations && connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 11").get() && !connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 12").get();
+    if (needsTask017 || needsTask022 || needsTask024 || needsSkillAttribute || needsFingerprintVersion || needsReviewJobs || needsSceneNarration || needsAliases) {
       const backupDirectory = path.join(path.dirname(databasePath), "backups");
       fs.mkdirSync(backupDirectory, { recursive: true });
-      const backupPrefix = needsTask017 ? "before-task017-" : needsTask022 ? "before-task022-" : needsTask024 ? "before-task024-" : needsSkillAttribute || needsFingerprintVersion ? "before-task025-hf01-" : "before-task026-";
+      const backupPrefix = needsTask017 ? "before-task017-" : needsTask022 ? "before-task022-" : needsTask024 ? "before-task024-" : needsSkillAttribute || needsFingerprintVersion ? "before-task025-hf01-" : needsReviewJobs ? "before-task026-" : needsSceneNarration ? "before-task027-" : "before-task028-";
       const backupPath = path.join(backupDirectory, backupPrefix + require("node:crypto").randomUUID() + ".db");
       connection.exec("VACUUM INTO '" + backupPath.replace(/'/g, "''") + "'");
     }

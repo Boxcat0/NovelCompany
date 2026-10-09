@@ -4,6 +4,7 @@ const { IPC_CHANNELS } = require("./ipc-channels.cjs");
 
 const registeredIpcMains = new WeakSet();
 const records = require("../database/repositories/canon-record-repository.cjs");
+const aliases = require('../database/repositories/canon-alias-repository.cjs');
 
 /**
  * Canon lifecycle, 정의 조회와 범위 검증을 수행하는 Record API를 Result 계약으로 한 번만 등록한다.
@@ -11,6 +12,10 @@ const records = require("../database/repositories/canon-record-repository.cjs");
 function registerCanonHandlers(ipcMain) {
   if (registeredIpcMains.has(ipcMain)) return;
   const recordActions = [
+    [IPC_CHANNELS.CANON_ALIAS_LIST, aliases.list],
+    [IPC_CHANNELS.CANON_ALIAS_CREATE, aliases.create],
+    [IPC_CHANNELS.CANON_ALIAS_UPDATE, aliases.update],
+    [IPC_CHANNELS.CANON_ALIAS_DELETE, aliases.delete],
     [IPC_CHANNELS.CANON_RECORD_GET_BY_SET_ID, records.getBySetId],
     [IPC_CHANNELS.CANON_RECORD_GET_BY_ID, records.getById],
     [IPC_CHANNELS.CANON_RECORD_GET_CREATE_READINESS, records.getCreateReadiness],

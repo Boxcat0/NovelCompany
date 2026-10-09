@@ -102,6 +102,7 @@ function validateCanonDeletion(temporaryRoot) {
       recordOptionValueCount: generic ? 1 : 0, fieldValueCount: generic ? 1 : 0,
       recordCount: generic ? 3 : 0, optionCount: generic ? 4 : 0, fieldCount: generic ? 31 : 0,
       setCount: generic ? 11 : 0, legacyDataCount: legacy ? 15 : 0,
+      aliasCount: 0,
       totalDependentRowCount: (generic ? 52 : 0) + (legacy ? 15 : 0),
     });
     const readSnapshot = databaseSnapshot();

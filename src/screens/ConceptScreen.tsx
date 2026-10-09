@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { CharacterAliasManager } from '../components/CharacterAliasManager';
 import DynamicCanonForm, { validateCanonForm } from "../components/DynamicCanonForm";
 import type { CanonDeletionStatus, CanonRecord, CanonRecordInput, CanonRecordSummary, CanonScope, CanonSpace, CanonSet, CanonSetDefinition, CreateReadiness, IpcResult, ReferenceOption, StoredWork } from "../types/electron-api";
 
@@ -60,14 +61,21 @@ function ConceptScreen({ onNavigationState }: { onNavigationState?: (dirty: bool
   const [baseline, setBaseline] = useState("");
   const [options, setOptions] = useState<Record<string, ReferenceOption[]>>({});
   const [actionBusy, setBusy] = useState(true);
+  const [aliasDirty, setAliasDirty] = useState(false);
+  const [aliasBusy, setAliasBusy] = useState(false);
+  /** Alias draft와 쓰기 상태를 Character 입력 손실 및 이동 보호에 연결한다. */
+  const handleAliasState = useCallback((dirty: boolean, busy: boolean) => { setAliasDirty(dirty); setAliasBusy(busy); }, []);
   const [setLoading, setSetLoading] = useState(false);
   const setRequestId = useRef(0);
-  const busy = actionBusy || setLoading;
+  const busy = actionBusy || setLoading || aliasBusy;
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const mounted = useRef(true);
   const dirty = input !== null && JSON.stringify(input) !== baseline;
   const scope = definition ? { canonSpaceId: definition.canonSpaceId, setId: definition.id } : null;
+  const organizationFieldId = definition?.fields.find(field => field.key === 'organization')?.id;
+  const savedOrganizationId = organizationFieldId && baseline ? JSON.parse(baseline).fieldValues?.[organizationFieldId] : null;
+  const savedOrganizationName = organizationFieldId ? options[organizationFieldId]?.find(option => option.id === savedOrganizationId)?.displayName ?? null : null;
 
   useEffect(() => {
     mounted.current = true;
@@ -84,17 +92,17 @@ function ConceptScreen({ onNavigationState }: { onNavigationState?: (dirty: bool
   }, []);
 
   // 화면의 활성 상태와 App 이동 보호 ref를 같은 commit에 맞춰 완료 직후 이동도 허용한다.
-  useLayoutEffect(() => { onNavigationState?.(dirty, busy); }, [dirty, busy, onNavigationState]);
+  useLayoutEffect(() => { onNavigationState?.(dirty || aliasDirty, busy); }, [dirty, aliasDirty, busy, onNavigationState]);
   useEffect(() => {
     /** 창 종료 시 저장 전 변경사항의 손실을 확인한다. */
-    function beforeUnload(event: BeforeUnloadEvent) { if (dirty || busy) { event.preventDefault(); event.returnValue = ""; } }
+    function beforeUnload(event: BeforeUnloadEvent) { if (dirty || aliasDirty || busy) { event.preventDefault(); event.returnValue = ""; } }
     window.addEventListener("beforeunload", beforeUnload);
     return () => window.removeEventListener("beforeunload", beforeUnload);
-  }, [dirty, busy]);
+  }, [dirty, aliasDirty, busy]);
 
   /** 쓰기 중 이탈을 막고 입력 폐기를 확인하되 Set 간 읽기는 최신 요청으로 교체할 수 있게 한다. */
   function canLeave(confirmation = "저장하지 않은 변경사항이 있습니다.\n변경 내용을 버리고 이동하시겠습니까?", switchingSet = false) {
-    return !requestPending.current && !actionBusy && (!setLoading || switchingSet) && (!dirty || window.confirm(confirmation));
+    return !requestPending.current && !actionBusy && !aliasBusy && (!setLoading || switchingSet) && (!(dirty || aliasDirty) || window.confirm(confirmation));
   }
 
   /** 요청 중 중복 조작을 막고 IPC 실패 또는 통신 오류를 한국어로 표시한다. */
@@ -131,6 +139,7 @@ function ConceptScreen({ onNavigationState }: { onNavigationState?: (dirty: bool
 
   /** 이전 Canon의 선택/폼/참조 ID를 모두 비워 삭제 후 오래된 데이터로 요청하지 않게 한다. */
   function resetCanonEditor() {
+    setAliasDirty(false); setAliasBusy(false);
     setRequestId.current++; setSetLoading(false);
     setCanonSpace(null); setSpaceLoaded(false); setSets([]); setDefinition(null);
     setRecords([]); setReadiness({}); setRecordId(null); setInput(null); setBaseline(""); setOptions({});
@@ -187,6 +196,7 @@ function ConceptScreen({ onNavigationState }: { onNavigationState?: (dirty: bool
     if (!canLeave(undefined, true)) return;
     const requestId = ++setRequestId.current;
     setSetLoading(true); onNavigationState?.(false, true);
+    setAliasDirty(false); setAliasBusy(false);
     setInput(null); setDefinition(null); setRecords([]); setRecordId(null); setOptions({}); setBaseline(""); setError(""); setMessage("");
     try {
       const nextScope = { canonSpaceId: set.canonSpaceId, setId: set.id };
@@ -214,6 +224,7 @@ function ConceptScreen({ onNavigationState }: { onNavigationState?: (dirty: bool
   async function handleOpenRecord(id: string | null) {
     if (!canLeave() || !definition || !scope) return;
     await runAction(async () => {
+      setAliasDirty(false); setAliasBusy(false);
       if (id === null) {
         const ready = unwrap(await window.novelCompany.canon.records.getCreateReadiness(scope));
         setReadiness((previous) => ({ ...previous, [scope.setId]: ready }));
@@ -292,6 +303,8 @@ function ConceptScreen({ onNavigationState }: { onNavigationState?: (dirty: bool
         <div>
           {definition && <details className="canon-definition"><summary>구조 보기</summary><p>{definition.recordNameLabel}</p>{definition.fields.map((field) => <dl key={field.id}><dt>{field.label}{field.required ? " (필수)" : " (선택)"}</dt><dd>{field.valueType} · {field.inputControl}{field.referenceSet ? " · " + field.referenceSet.name + " 참조" : ""}{field.options.length ? " · " + field.options.map((option) => option.label).join(", ") : ""}</dd></dl>)}</details>}
           {definition && input ? <DynamicCanonForm definition={definition} input={input} options={options} busy={busy} editing={recordId !== null} dirty={dirty} allowLegacySkillMissing={legacySkillMissing()} onChange={setInput} onSave={() => void handleSave()} onDelete={() => void handleDelete()} onNavigateReference={handleNavigateDependency} /> : definition && <p>항목을 선택하거나 새 항목을 등록하세요.</p>}
+          {definition?.key === 'character' && recordId && work && input && <CharacterAliasManager key={`${work.id}:${recordId}`} workId={work.id} recordId={recordId} disabled={actionBusy || setLoading} organization={savedOrganizationName} onStateChange={handleAliasState} />}
+          {definition?.key === 'character' && input && !recordId && <p>캐릭터를 먼저 저장한 뒤 별칭을 등록할 수 있습니다.</p>}
         </div>
       </div>}
       {spaceLoaded && canonSpace && <section className="canon-danger-zone" aria-label="Canon 전체 삭제 관리">

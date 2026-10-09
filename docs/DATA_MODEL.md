@@ -1,5 +1,25 @@
 # NovelCompany 데이터 모델 설계
 
+## Task028 — canon_record_aliases와 이름 해석 버전
+
+Migration `012_add_canon_record_aliases.sql`은 `canon_record_aliases(id, canon_record_id, alias_text, normalized_alias, created_at, updated_at)`를 추가한다. canon_record_id는 Generic canon_records FK ON DELETE CASCADE다. UNIQUE는 `(canon_record_id, normalized_alias)` 범위에만 적용한다. Alias 문자열에 전역 UNIQUE를 두지 않는다. Character-only insert/update trigger와 Repository의 Work/Space/Record/Set 검사로 생성·변경 범위를 제한한다. Legacy Canon 테이블은 사용하지 않는다.
+
+정규화는 NFC와 앞뒤 공백 제거이며 대소문자/내부 공백을 보존한다. Alias 표시/비교 값은 분리한다. Organization 정보는 Alias 행에 저장하지 않고 WorkContext의 Character `organization` Reference에서 해석한다. Canon 삭제 영향 DTO의 aliasCount와 totalDependentRowCount에 Alias 행을 포함하며 실제 삭제는 Record cascade를 따른다. Task027 narrator 무효화 trigger와 함께 한 transaction으로 rollback된다.
+
+review_runs와 review_jobs에는 nullable `name_resolution_version`을 추가하며 허용 값은 CHARACTER_NAMES_V1이다. 기존 행은 null, 기존 fingerprint_version과 Canon/Scene hash는 변경하지 않는다. 신규 제출의 저장 discriminator는 V2 + CHARACTER_NAMES_V1이며 Canon hash의 selector 입력은 RELEVANT_CANON_V3이다. null 버전은 Legacy 이름 탐지로 기존 Relevant V1/V2를 재현한다. Job → Run 선점 transaction에서 이름 버전도 복사한다. 011 DB 업그레이드는 `before-task028-<UUID>.db` 백업 후 수행하며 백업 실패 시 migration을 실행하지 않는다.
+
+ReviewContext의 nameMentions는 text/normalizedName/sceneIndex/sceneIdentity/range/quoteContext/status/recordId/candidateIds/candidates/certainty를 제공한다. candidates는 recordId/displayName/matchTypes/organization이며 MATCHED도 certainty=REGISTERED_NAME_CANDIDATES로 실제 지시 대상 확정과 구별한다. selectedRecords에는 전체 Alias 목록을 포함하지 않고 실제 명칭 후보 결과만 신규 hash에 반영한다.
+
+## Task027 — Scene Narration Metadata
+
+Migration `011_add_scene_narration_metadata.sql`은 기존 migration을 변경하지 않는다. 기존 010 DB는 `initializeDatabase`가 `backups/before-task027-<UUID>.db`를 만든 뒤 확장한다. 백업 실패 시 진행하지 않는다.
+
+`scene_narration_metadata`에는 `id`, `episode_id`, `episode_content_hash`, `scene_layout_version`, `scene_identity`, `narration_mode`, nullable `narrator_character_id`, `narrator_invalidated`, `created_at`, `updated_at`을 저장한다. Episode/hash/layout/identity UNIQUE로 같은 입력의 장면에 한 행만 허용한다. FIRST_PERSON_CHARACTER는 Character ID가 필수이고 나머지 모드는 null이다. DB CHECK와 insert/update scope trigger 및 Repository 검증을 함께 적용한다. Generic canon_records → canon_sets(key=character) → canon_spaces.work_id가 Episode work_id와 같아야 한다. Legacy Canon 테이블을 사용하지 않는다.
+
+Character 삭제 전 trigger는 참조 Metadata를 UNKNOWN/null/invalidated=1로 바꾸며 Canon 전체 삭제도 허용한다. Episode 삭제 전 trigger는 소유 Metadata를 제거하고, Episode 삭제가 FK로 실패하면 함께 rollback된다. 오래된 원고/layout의 행은 보존하되 현재 장면에 사용하지 않는다. 현재 행이 없으면 UNKNOWN/UNSET, 있으면 AUTHOR_SET이며 삭제 참조는 NARRATOR_DELETED로 읽는다.
+
+review_jobs와 review_runs에 nullable `scene_metadata_hash`, `scene_metadata_version`을 추가한다. 기존 행은 null이며 backfill하지 않는다. 신규 Job은 `SCENE_NARRATION_V1`과 결정적 SHA-256을 기록하고 Run 생성 transaction에서 그대로 복사한다. 별도 scene hash 때문에 기존 Canon V1/V2 해시 입력은 변하지 않는다. Freshness DTO는 `sceneMetadataChanged`와 `sceneMetadataComparison`(CURRENT/CHANGED/LEGACY_NOT_TRACKED/UNDETERMINED_EPISODE_CHANGED)을 제공한다.
+
 ## Task026 — ReviewJob과 Episode 잠금
 
 Migration 010은 `review_jobs(queue_sequence INTEGER PRIMARY KEY AUTOINCREMENT, id UNIQUE, work_id, episode_id, status, episode_content_hash, canon_context_hash, context_mode, fingerprint_version, review_run_id UNIQUE NULL, error_code, error_message, created_at, started_at, completed_at)`를 추가한다. Work/Episode/ReviewRun FK는 모두 ON DELETE RESTRICT다. status는 QUEUED/RUNNING/COMPLETED/FAILED/CANCELLED/RESUBMIT_REQUIRED다. `(episode_id) WHERE status IN ('QUEUED','RUNNING')`과 상수 `(1) WHERE status='RUNNING'`의 partial unique index가 중복 활성 제출과 전역 동시 실행을 막는다. `queue_sequence`는 취소·재제출 후에도 재사용하지 않는다.
