@@ -1,3 +1,4 @@
+const { completeLegacyRun } = require('../review/testing/finding-fixtures.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -64,7 +65,7 @@ async function validateAliasIpc(ipcMain, runtimeApi) {
 /** 011 DB에 012를 백업 후 적용하며 기존 Job/Run source와 queue 순번을 보존한다. */
 function validateMigration(root) {
   const file = path.join(root, 'novelcompany.db'); const db = getDatabase();
-  db.exec('DROP TABLE canon_record_aliases; ALTER TABLE review_jobs DROP COLUMN name_resolution_version; ALTER TABLE review_runs DROP COLUMN name_resolution_version; DELETE FROM schema_migrations WHERE version = 12');
+  db.exec('DROP TRIGGER review_job_processor_immutable; ALTER TABLE review_jobs DROP COLUMN processor_key; DROP TABLE canon_record_aliases; ALTER TABLE review_runs DROP COLUMN findings_contract_version; ALTER TABLE review_findings DROP COLUMN contract_version; ALTER TABLE review_findings DROP COLUMN details_json; ALTER TABLE review_jobs DROP COLUMN name_resolution_version; ALTER TABLE review_runs DROP COLUMN name_resolution_version; DELETE FROM schema_migrations WHERE version >= 12');
   const before = ['works', 'episodes', 'canon_records', 'review_runs', 'review_jobs'].map(table => db.prepare('SELECT * FROM ' + table + ' ORDER BY rowid').all());
   const sequence = db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'review_jobs'").get()?.seq;
   closeDatabase();
@@ -74,7 +75,7 @@ function validateMigration(root) {
   const untouched = new DatabaseSync(failFile, { readOnly: true });
   try { assert.equal(untouched.prepare('SELECT MAX(version) n FROM schema_migrations').get().n, 11); assert.deepEqual(untouched.prepare('SELECT * FROM review_jobs ORDER BY rowid').all(), before[4]); } finally { untouched.close(); }
   initializeDatabase(file);
-  const after = ['works', 'episodes', 'canon_records', 'review_runs', 'review_jobs'].map(table => getDatabase().prepare('SELECT * FROM ' + table + ' ORDER BY rowid').all().map(({ name_resolution_version, ...row }) => { if (table.startsWith('review_')) assert.equal(name_resolution_version, null); return { ...row }; }));
+  const after = ['works', 'episodes', 'canon_records', 'review_runs', 'review_jobs'].map(table => getDatabase().prepare('SELECT * FROM ' + table + ' ORDER BY rowid').all().map(({ name_resolution_version, findings_contract_version, ...row }) => { if (table.startsWith('review_')) assert.equal(name_resolution_version, null); if (table === 'review_jobs') delete row.processor_key; return { ...row }; }));
   assert.deepEqual(after, before.map(rows => rows.map(row => ({ ...row }))));
   assert.equal(getDatabase().prepare("SELECT seq FROM sqlite_sequence WHERE name = 'review_jobs'").get()?.seq, sequence);
   assert.equal(getDatabase().prepare('SELECT COUNT(*) n FROM canon_record_aliases').get().n, 0);
@@ -140,8 +141,8 @@ async function validate() {
     assert.deepEqual(boundaries.nameMentions.map(m => m.text), ['한 씨', '한 씨', '기사단장님']);
     assert.throws(() => buildReviewContext(workContext, [], 'FUTURE'));
     assert.throws(() => buildRelevantCanonHash(buildReviewContext(workContext), 'V2'));
-    const legacyV1 = runs.createRun({ ...episodeScope, processorKey: 'LEGACY', contextMode: 'RELEVANT_CANON_V1', fingerprintVersion: 'V1', episodeContentHash: source.episodeContentHash, canonContextHash: source.relevantV1ContextHash }); runs.completeRun(legacyV1.id, []);
-    const legacyV2 = runs.createRun({ ...episodeScope, processorKey: 'LEGACY', contextMode: 'RELEVANT_CANON_V1', fingerprintVersion: 'V2', episodeContentHash: source.episodeContentHash, canonContextHash: source.relevantV2ContextHash, sceneMetadataHash: source.sceneMetadataHash, sceneMetadataVersion: source.sceneMetadataVersion }); runs.completeRun(legacyV2.id, []);
+    const legacyV1 = runs.createRun({ ...episodeScope, processorKey: 'LEGACY', contextMode: 'RELEVANT_CANON_V1', fingerprintVersion: 'V1', episodeContentHash: source.episodeContentHash, canonContextHash: source.relevantV1ContextHash }); completeLegacyRun(legacyV1.id, []);
+    const legacyV2 = runs.createRun({ ...episodeScope, processorKey: 'LEGACY', contextMode: 'RELEVANT_CANON_V1', fingerprintVersion: 'V2', episodeContentHash: source.episodeContentHash, canonContextHash: source.relevantV2ContextHash, sceneMetadataHash: source.sceneMetadataHash, sceneMetadataVersion: source.sceneMetadataVersion }); completeLegacyRun(legacyV2.id, []);
     const run = await startEpisodeReview(storage, episodeScope);
     const originalHash = run.source.canonContextHash;
     aliases.update(scopes[0], first.id, '지수'.normalize('NFD'));
@@ -204,7 +205,7 @@ async function validate() {
     const running = await queue.submit(queuedScope); await waitFor(() => Boolean(finish));
     const capturedInput = structuredClone(captured);
     aliases.delete(scopes[2], aliases.list(scopes[2]).find(a => a.aliasText === '새 별명').id); // RUNNING도 Canon 별칭 편집 허용.
-    assert.deepEqual(captured, capturedInput); finish({ findings: [] }); await waitFor(() => jobs.getById(running.id).status === 'COMPLETED');
+    assert.deepEqual(captured, capturedInput); finish({ contractVersion: 'REVIEW_FINDINGS_V1', findings: [] }); await waitFor(() => jobs.getById(running.id).status === 'COMPLETED');
     assert.equal((await getReviewsByEpisode(storage, queuedScope))[0].freshness.isCurrent, false); queue.stop();
     const beforeUnused = buildCurrentSource(await buildEpisodeWorkContext(storage, queuedScope));
     queue = createReviewQueue(storage); queue.stop(); const unchanged = await queue.submit(queuedScope);

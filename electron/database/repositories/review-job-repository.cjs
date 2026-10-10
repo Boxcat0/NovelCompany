@@ -1,12 +1,15 @@
 const { randomUUID } = require('node:crypto');
 const { getDatabase } = require('../database.cjs');
 const { RepositoryError } = require('./repository-error.cjs');
+const { insertValidatedFindings } = require('./review-finding-writer.cjs');
+const { validateProcessorSelection } = require('../../review/review-processor-selection.cjs');
 
-/** Job row를 파일 경로와 내부 SQL 객체가 없는 공개 상태로 바꾼다. */
+/** 저장된 검토 방식과 상태를 공개 DTO로 바꾸며 구버전 선택은 STUB로 해석한다. */
 function toJob(row) {
   if (!row) return null;
   return { id: row.id, workId: row.work_id, episodeId: row.episode_id,
     queueSequence: row.queue_sequence, status: row.status,
+    processorKey: row.processor_key ?? 'STUB_V1',
     episodeContentHash: row.episode_content_hash, canonContextHash: row.canon_context_hash,
     contextMode: row.context_mode, fingerprintVersion: row.fingerprint_version,
     nameResolutionVersion: row.name_resolution_version,
@@ -50,14 +53,15 @@ function assertNoActiveJob(episodeId) {
   }
 }
 
-/** 검증된 제출 fingerprint를 QUEUED Job으로 저장하고 DB unique 제약으로 중복을 막는다. */
+/** 허용 Processor와 제출 fingerprint를 함께 저장하며 중복 활성 제출을 차단한다. */
 function submit(input) {
   const database = getDatabase();
   const id = randomUUID();
   const now = new Date().toISOString();
+  const processorKey = validateProcessorSelection(input.processorKey);
   try {
-    database.prepare("INSERT INTO review_jobs (id, work_id, episode_id, status, episode_content_hash, canon_context_hash, context_mode, fingerprint_version, created_at, scene_metadata_hash, scene_metadata_version, name_resolution_version) VALUES (?, ?, ?, 'QUEUED', ?, ?, 'RELEVANT_CANON_V1', 'V2', ?, ?, ?, ?)")
-      .run(id, input.workId, input.episodeId, input.episodeContentHash, input.canonContextHash, now, input.sceneMetadataHash ?? null, input.sceneMetadataVersion ?? null, input.nameResolutionVersion ?? null);
+    database.prepare("INSERT INTO review_jobs (id, work_id, episode_id, status, episode_content_hash, canon_context_hash, context_mode, fingerprint_version, created_at, scene_metadata_hash, scene_metadata_version, name_resolution_version, processor_key) VALUES (?, ?, ?, 'QUEUED', ?, ?, 'RELEVANT_CANON_V1', 'V2', ?, ?, ?, ?, ?)")
+      .run(id, input.workId, input.episodeId, input.episodeContentHash, input.canonContextHash, now, input.sceneMetadataHash ?? null, input.sceneMetadataVersion ?? null, input.nameResolutionVersion ?? null, processorKey);
   } catch (cause) {
     if (String(cause?.message).includes('UNIQUE constraint failed')) throw new RepositoryError('REVIEW_JOB_ALREADY_ACTIVE', '이 회차는 이미 검토 대기 중이거나 진행 중입니다.', cause);
     throw new RepositoryError('REVIEW_SUBMIT_FAILED', '검토부 제출을 저장하지 못했습니다.', cause);
@@ -84,13 +88,15 @@ function finishQueued(id, status, code, message) {
   return result.changes === 1 ? getById(id) : null;
 }
 
-/** QUEUED 선점과 RUNNING ReviewRun 생성·연결을 하나의 transaction으로 확정한다. */
+/** 저장 선택과 운영 실행 방식의 일치를 확인하고 Job 선점·Run 연결을 함께 확정한다. */
 function claimWithRun(id, processorKey) {
   const database = getDatabase();
   database.exec('BEGIN IMMEDIATE');
   try {
     const job = database.prepare("SELECT * FROM review_jobs WHERE id = ? AND status = 'QUEUED'").get(id);
     if (!job) { database.exec('ROLLBACK'); return null; }
+    // 임의 TEST/MOCK Processor는 격리 Main의 신뢰된 factory 주입에서만 전달된다.
+    if (['STUB_V1', 'RULE_V1'].includes(processorKey) && processorKey !== job.processor_key) throw new RepositoryError('REVIEW_PROCESSOR_INVALID', '제출한 검토 방식과 실행 방식이 다릅니다.');
     if (database.prepare("SELECT 1 FROM review_jobs WHERE status = 'RUNNING' LIMIT 1").get()) { database.exec('ROLLBACK'); return null; }
     const runId = randomUUID();
     const now = new Date().toISOString();
@@ -106,19 +112,19 @@ function claimWithRun(id, processorKey) {
   }
 }
 
-/** Finding·ReviewRun 완료·ReviewJob 완료를 원자적으로 저장해 잠금을 해제한다. */
-function complete(id, findings) {
+/** 검증된 Finding·ReviewRun·ReviewJob을 하나의 동기 transaction으로 완료한다. */
+function complete(id, result) {
   const database = getDatabase();
   database.exec('BEGIN IMMEDIATE');
   try {
     const job = database.prepare("SELECT review_run_id FROM review_jobs WHERE id = ? AND status = 'RUNNING'").get(id);
     if (!job?.review_run_id) throw new Error('Running ReviewJob not found');
     const now = new Date().toISOString();
-    const insert = database.prepare('INSERT INTO review_findings (id, review_run_id, category, message, sort_order, created_at) VALUES (?, ?, ?, ?, ?, ?)');
-    findings.forEach((finding, index) => insert.run(randomUUID(), job.review_run_id, finding.category, finding.message, index, now));
+    insertValidatedFindings(database, job.review_run_id, result, now);
     const run = database.prepare("UPDATE review_runs SET status = 'COMPLETED', completed_at = ? WHERE id = ? AND status = 'RUNNING'").run(now, job.review_run_id);
     if (run.changes !== 1) throw new Error('Running ReviewRun not found');
-    database.prepare("UPDATE review_jobs SET status = 'COMPLETED', completed_at = ? WHERE id = ? AND status = 'RUNNING'").run(now, id);
+    const completedJob = database.prepare("UPDATE review_jobs SET status = 'COMPLETED', completed_at = ? WHERE id = ? AND status = 'RUNNING'").run(now, id);
+    if (completedJob.changes !== 1) throw new Error('Running ReviewJob not found');
     database.exec('COMMIT');
     return getById(id);
   } catch (cause) {

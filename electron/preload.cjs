@@ -94,7 +94,7 @@ function getEpisodeReviewContext(input) {
   return ipcRenderer.invoke('context:get-episode-review-context', input);
 }
 
-/** 저장된 Episode를 검토 대기열에 접수하도록 Main에 요청한다. */
+/** 저장된 Episode와 선택 검토 방식을 기존 제출 IPC로 Main에 전달한다. */
 function submitReview(input) { return ipcRenderer.invoke("reviews:submit", input); }
 
 /** 전역 대기열과 선택 회차의 최근 제출 상태를 읽는다. */

@@ -2,10 +2,10 @@
 function createStubReviewProcessor() {
   return {
     processorKey: "STUB_V1",
-    /** 실제 AI 호출 없이 ReviewContext 계약만 확인한다. */
+    /** 실제 검토 없이 V1의 빈 결과를 반환하여 분석 경고와 Finding을 분리한다. */
     async review(workContext) {
       if (!workContext || workContext.scope !== "RELEVANT_CANON") throw new Error("ReviewContext is required.");
-      return { findings: [] };
+      return { contractVersion: 'REVIEW_FINDINGS_V1', findings: [] };
     },
   };
 }

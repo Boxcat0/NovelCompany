@@ -1,8 +1,9 @@
+const { executeReviewProcessor } = require('./review-findings-contract.cjs');
 const { buildEpisodeWorkContext } = require('../context/episode-work-context-builder.cjs');
-const { buildCurrentSource, validateReviewResult } = require('./review-service.cjs');
+const { buildCurrentSource } = require('./review-service.cjs');
 const jobs = require('../database/repositories/review-job-repository.cjs');
 const { RepositoryError } = require('../database/repositories/repository-error.cjs');
-const { createStubReviewProcessor } = require('./stub-review-processor.cjs');
+const { createReviewProcessor, validateProcessorSelection } = require('./review-processor-selection.cjs');
 const { withEpisodeSubmission } = require('./episode-operation-gate.cjs');
 const { logIpcError } = require('../logging/logger.cjs');
 let activeWorker = null;
@@ -14,8 +15,8 @@ function submissionSource(workContext, nameResolutionVersion) {
     contextMode: 'RELEVANT_CANON_V1', fingerprintVersion: 'V2', nameResolutionVersion: source.nameResolutionVersion, sceneMetadataHash: source.sceneMetadataHash, sceneMetadataVersion: source.sceneMetadataVersion, reviewContext: source.reviewContext };
 }
 
-/** 한 Main 프로세스에서 FIFO 작업을 직렬 실행하고 Job 상태를 SQLite에 보존한다. */
-function createReviewQueue(episodeStorage, processorFactory = createStubReviewProcessor) {
+/** 한 Main 프로세스에서 제출 시 저장한 방식으로 FIFO를 실행하며 테스트 주입은 Main 내부에 한정한다. */
+function createReviewQueue(episodeStorage, processorFactory = createReviewProcessor) {
   let draining = false;
   let stopped = false;
   let started = false;
@@ -31,16 +32,18 @@ function createReviewQueue(episodeStorage, processorFactory = createStubReviewPr
     kick();
   }
 
-  /** Work/Episode 소속과 저장 TXT를 확인한 후 QUEUED Job을 즉시 접수한다. */
+  /** Work/Episode와 허용 Processor를 검증하고 제출 시 선택을 QUEUED Job에 고정한다. */
   async function submit(input) {
-    if (!input || typeof input.workId !== 'string' || typeof input.episodeId !== 'string' || Object.keys(input).some(key => !['workId', 'episodeId'].includes(key))) {
+    if (!input || typeof input.workId !== 'string' || typeof input.episodeId !== 'string' || Object.keys(input).some(key => !['workId', 'episodeId', 'processorKey'].includes(key))) {
       throw new RepositoryError('REVIEW_SUBMISSION_INVALID', '저장된 회차를 선택해 검토부에 제출해 주세요.');
     }
-    return withEpisodeSubmission(input.episodeId, async () => {
-      jobs.assertNoActiveJob(input.episodeId);
-      const context = await buildEpisodeWorkContext(episodeStorage, input);
+    const { workId, episodeId } = input;
+    const processorKey = validateProcessorSelection(input.processorKey);
+    return withEpisodeSubmission(episodeId, async () => {
+      jobs.assertNoActiveJob(episodeId);
+      const context = await buildEpisodeWorkContext(episodeStorage, { workId, episodeId });
       const source = submissionSource(context);
-      const job = jobs.submit({ workId: context.work.id, episodeId: context.episode.id, ...source });
+      const job = jobs.submit({ workId: context.work.id, episodeId: context.episode.id, processorKey, ...source });
       kick();
       return job;
     });
@@ -78,7 +81,7 @@ function createReviewQueue(episodeStorage, processorFactory = createStubReviewPr
     } finally { draining = false; }
   }
 
-  /** 최신 입력을 대조한 뒤 원자적으로 Run을 생성하고 고정된 Context만 Processor에 넘긴다. */
+  /** 입력과 저장된 방식을 재대조하고 Context 복사본 결과를 검증한 뒤 Run·Job을 완료한다. */
   async function processJob(job) {
     let source;
     try {
@@ -94,16 +97,16 @@ function createReviewQueue(episodeStorage, processorFactory = createStubReviewPr
       jobs.finishQueued(job.id, 'RESUBMIT_REQUIRED', !job.sceneMetadataHash ? 'REVIEW_SCENE_METADATA_NOT_TRACKED' : 'REVIEW_INPUT_CHANGED', '제출 기준 원고·Canon·장면 시점이 현재 입력과 다릅니다. 다시 제출해 주세요.');
       return;
     }
-    const processor = processorFactory();
+    const processor = processorFactory(job.processorKey);
     const claimed = jobs.claimWithRun(job.id, processor.processorKey);
     if (!claimed) return jobs.getById(job.id)?.status !== 'QUEUED';
     try {
-      const findings = validateReviewResult(await processor.review(source.reviewContext));
+      const findings = await executeReviewProcessor(processor, source.reviewContext);
       jobs.complete(claimed.id, findings);
     } catch (cause) {
-      const code = cause instanceof RepositoryError && cause.code === 'REVIEW_RESULT_INVALID' ? cause.code : 'REVIEW_FAILED';
+      const code = cause instanceof RepositoryError && ['REVIEW_RESULT_INVALID', 'REVIEW_FINDING_RANGE_INVALID', 'REVIEW_FINDING_CANON_INVALID'].includes(cause.code) ? cause.code : 'REVIEW_FAILED';
       jobs.failRunning(claimed.id, code, '검토 작업을 완료하지 못했습니다.');
-      logIpcError({ channel: 'reviews:worker', code, message: '검토 작업을 완료하지 못했습니다.', cause });
+      logIpcError({ channel: 'reviews:worker', code, message: '검토 작업을 완료하지 못했습니다.' });
     }
   }
 

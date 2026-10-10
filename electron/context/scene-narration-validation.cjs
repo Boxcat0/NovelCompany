@@ -1,3 +1,4 @@
+const { completeLegacyRun } = require('../review/testing/finding-fixtures.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -48,15 +49,15 @@ async function waitFor(check) { for (let i = 0; i < 200; i++) { if (check()) ret
 function validateMigration(root, episodeId) {
   const { DatabaseSync } = require('node:sqlite');
   const db = getDatabase();
-  db.exec('DROP TABLE canon_record_aliases; ALTER TABLE review_runs DROP COLUMN name_resolution_version; ALTER TABLE review_jobs DROP COLUMN name_resolution_version; DROP TRIGGER invalidate_deleted_scene_narrator; DROP TRIGGER delete_episode_scene_narration; DROP TABLE scene_narration_metadata; ALTER TABLE review_runs DROP COLUMN scene_metadata_hash; ALTER TABLE review_runs DROP COLUMN scene_metadata_version; ALTER TABLE review_jobs DROP COLUMN scene_metadata_hash; ALTER TABLE review_jobs DROP COLUMN scene_metadata_version; DELETE FROM schema_migrations WHERE version >= 11');
+  db.exec('DROP TRIGGER review_job_processor_immutable; ALTER TABLE review_jobs DROP COLUMN processor_key; DROP TABLE canon_record_aliases; ALTER TABLE review_runs DROP COLUMN findings_contract_version; ALTER TABLE review_findings DROP COLUMN contract_version; ALTER TABLE review_findings DROP COLUMN details_json; ALTER TABLE review_runs DROP COLUMN name_resolution_version; ALTER TABLE review_jobs DROP COLUMN name_resolution_version; DROP TRIGGER invalidate_deleted_scene_narrator; DROP TRIGGER delete_episode_scene_narration; DROP TABLE scene_narration_metadata; ALTER TABLE review_runs DROP COLUMN scene_metadata_hash; ALTER TABLE review_runs DROP COLUMN scene_metadata_version; ALTER TABLE review_jobs DROP COLUMN scene_metadata_hash; ALTER TABLE review_jobs DROP COLUMN scene_metadata_version; DELETE FROM schema_migrations WHERE version >= 11');
   const oldRuns = db.prepare('SELECT * FROM review_runs ORDER BY id').all();
   const oldJobs = db.prepare('SELECT * FROM review_jobs ORDER BY id').all();
   const episode = db.prepare('SELECT * FROM episodes WHERE id = ?').get(episodeId);
   closeDatabase();
   const migrated = initializeDatabase(path.join(root, 'novelcompany.db'));
-  assert.equal(migrated.prepare('SELECT COUNT(*) n FROM schema_migrations').get().n, 12);
+  assert.equal(migrated.prepare('SELECT COUNT(*) n FROM schema_migrations').get().n, 14);
   for (const [table, expected] of [['review_runs', oldRuns], ['review_jobs', oldJobs]]) {
-    const actual = migrated.prepare('SELECT * FROM ' + table + ' ORDER BY id').all().map(({ name_resolution_version, scene_metadata_hash, scene_metadata_version, ...row }) => { assert.equal(scene_metadata_hash, null); assert.equal(scene_metadata_version, null); return { ...row }; });
+    const actual = migrated.prepare('SELECT * FROM ' + table + ' ORDER BY id').all().map(({ findings_contract_version, name_resolution_version, scene_metadata_hash, scene_metadata_version, ...row }) => { assert.equal(scene_metadata_hash, null); assert.equal(scene_metadata_version, null); if (table === 'review_jobs') delete row.processor_key; return { ...row }; });
     assert.deepEqual(actual, expected.map(row => ({ ...row })));
   }
   assert.deepEqual(migrated.prepare('SELECT * FROM episodes WHERE id = ?').get(episodeId), episode);
@@ -120,7 +121,7 @@ async function validate() {
     assert.ok(applySceneNarration(content, parseSceneLayout(content), wrongIdentity, snapshot.characters).scenes.every(s => s.narration.source === 'UNSET'));
     const run = await startEpisodeReview(storage, scope);
     assert.equal(run.source.sceneMetadataHash, hash);
-    const legacy = runs.createRun({ ...scope, processorKey: 'TEST', episodeContentHash: run.source.episodeContentHash, canonContextHash: require('../review/review-service.cjs').buildCurrentSource(await require('./episode-work-context-builder.cjs').buildEpisodeWorkContext(storage, scope), null).canonContextHash, contextMode: 'RELEVANT_CANON_V1', fingerprintVersion: 'V2' }); runs.completeRun(legacy.id, []);
+    const legacy = runs.createRun({ ...scope, processorKey: 'TEST', episodeContentHash: run.source.episodeContentHash, canonContextHash: require('../review/review-service.cjs').buildCurrentSource(await require('./episode-work-context-builder.cjs').buildEpisodeWorkContext(storage, scope), null).canonContextHash, contextMode: 'RELEVANT_CANON_V1', fingerprintVersion: 'V2' }); completeLegacyRun(legacy.id, []);
     await service.save(storage, input(snapshot, 'FIRST_PERSON_CHARACTER', f.other.id));
     let reviews = await getReviewsByEpisode(storage, scope);
     assert.equal(reviews.find(r => r.id === run.id).freshness.sceneMetadataComparison, 'CHANGED');
@@ -153,7 +154,7 @@ async function validate() {
     queue.start(); const running = await queue.submit(scope);
     await waitFor(() => Boolean(finish));
     await rejects(() => service.save(storage, input(snapshot)), 'EPISODE_REVIEW_LOCKED');
-    finish({ findings: [] }); await waitFor(() => jobs.getById(running.id).status === 'COMPLETED');
+    finish({ contractVersion: 'REVIEW_FINDINGS_V1', findings: [] }); await waitFor(() => jobs.getById(running.id).status === 'COMPLETED');
     assert.equal(runs.getById(jobs.getById(running.id).reviewRunId).sceneMetadataHash, running.sceneMetadataHash);
     await service.save(storage, input(snapshot)); queue.stop();
     const failed = await queue.submit(scope); getDatabase().prepare("UPDATE review_jobs SET status = 'FAILED' WHERE id = ?").run(failed.id); await service.save(storage, input(snapshot));

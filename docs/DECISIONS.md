@@ -1,5 +1,22 @@
 # NovelCompany 아키텍처 결정 기록
 
+## Task030 — 규칙 검토는 등록 관계를 비교하고 판단 범위를 제한한다
+
+- RULE_V1의 첫 규칙은 CHARACTER_SKILL_ATTRIBUTE_MISMATCH_V1, 규칙 버전 V1이다. 현재 Relevant Canon의 Character.skills와 전체 Character.attributes를 Skill.required_attribute ID와 비교한다. 같은 이름을 같은 Record로 취급하지 않으며 전체 Work나 재귀 관계로 범위를 확장하지 않는다.
+- 전체 참조 목록 확인 정보가 없거나 실제 목록과 다르면 판단하지 않는다. 필요 속성 null·필드/Record 누락도 내부 UNVERIFIABLE이며 INFO를 포함한 Finding을 만들지 않는다. 필요한 ID가 완전한 보유 목록에 없다는 사실은 WARNING/DETERMINISTIC 근거이지 실제 사용 불가능·작품 오류의 확정이 아니다. 계약·권능·예외는 작가 확인 사항이다.
+- 실제 능력 사용자 추론은 별도 단계다. Narrator·근접 이름·Organization으로 사용자를 결정하지 않고 기존 Ownership Checks 및 Alias AMBIGUOUS를 유지한다. 단일 이름 후보도 Finding에서 NAME_CANDIDATE로 보존한다. 추론을 Canon에 저장하지 않는다.
+- 기본 STUB_V1을 유지하고 RULE_V1은 사용자가 명시적으로 선택한다. Main은 두 키만 허용하며 Job 선택은 영속·불변이다. RULE_V1 정적 정의와 evidence에 규칙 버전/범위를 고정하여 과거 Run을 현재 규칙으로 재해석하지 않는다. V1/V2/V3 입력 fingerprint와 Task029 저장 계약은 재사용한다.
+- Findings/Run/Job 원자 완료, 실패 rollback, FIFO·잠금·재시작 정책을 유지한다. 규칙 추가를 이유로 DB/TXT/Canon을 Processor에서 직접 읽거나 수정하지 않는다. 실제 AI·Finding 승인/기각·자동 수정은 후속 작업이다.
+
+## Task029 — Finding은 판단과 근거이며 자동 수정 명령이 아니다
+
+- Category, Severity(INFO/WARNING/ERROR), Assessment(DETERMINISTIC/INFERENCE_CANDIDATE/UNDETERMINED)를 분리한다. ERROR는 오류 확정이 아니고 DETERMINISTIC도 작품 설정 오류 확정을 뜻하지 않는다. 근거 구조 검증과 문학적 판단의 타당성 검증은 별개다. 향후 AI 결과를 DETERMINISTIC으로 자동 승격하지 않는다.
+- TEXT_RANGE는 실행 당시 UTF-16 반개구간, 원문과 정확히 일치하는 발췌, nullable Scene identity를 저장한다. Scene을 지정하면 그 범위 안에 있어야 한다. CANON_RECORD는 관련 Canon과 evidence를 요구하며 가짜 원문 범위를 허용하지 않는다. 원고 전체 snapshot을 추가 저장하지 않는다.
+- Canon 유효성은 실행 Context의 선택 Record/명시 참조/작가 지정 서술자 또는 이름 후보로 제한한다. 현재 DB로 과거 Finding을 재해석하지 않는다. CONTEXT_RECORD는 Context 연결 사실이며 실제 발화자/능력 사용자를 확정하지 않는다. 이름만으로 선택된 인물은 NAME_CANDIDATE, 복수 후보는 AMBIGUOUS_CANDIDATE로 보존한다. 후보 그룹을 참조하면 전체 후보를 요구하고 소속도 최소 식별 snapshot으로 남긴다.
+- Result 중 하나라도 유효하지 않으면 전체 실패다. 검증 오류는 안정적인 코드와 한국어 메시지만 노출하며 Processor 예외의 원문 포함 가능성을 고려해 raw cause를 로그에 쓰지 않는다. 같은 record/role/mention 중복은 거부하며 서로 다른 언급의 후보 연결은 구분한다.
+- 기존 review_findings를 확장한다. 신규 컬럼 null은 Legacy이며 근거·Assessment를 발명하지 않는다. Findings 버전은 입력 hash 버전과 독립적이고 기존 hash 및 FULL/RELEVANT V1/V2/V3 비교 규칙은 유지한다.
+- STUB_V1 빈 결과는 처리 흐름 완료일 뿐 실제 검토가 아니다. MOCK_V1은 패키지에서 제외된 가상 fixture 전용이다. 규칙 검토는 Task030에서 추가하며 실제 AI Processor Adapter, 작가 승인·기각과 수정 흐름은 후속 작업이다. TXT와 Canon은 이 파이프라인에서 자동 변경하지 않는다.
+
 ## Task028 — 별칭은 등록 후보이며 실제 지시 대상은 미확정
 
 - Character Record와 Alias는 1:N이며 먼저 저장된 Generic character에서만 CRUD한다. 동일 Record 내 normalized Alias는 UNIQUE, 다른 Record끼리 같은 Alias와 다른 Character의 정식 이름 충돌은 허용한다.

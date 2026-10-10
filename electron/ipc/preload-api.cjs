@@ -95,7 +95,7 @@ function createNovelCompanyApi(ipcRenderer) {
     reviews: {
       /** 이전 시작 API도 제출 경로로 위임해 FIFO를 우회하지 못하게 한다. */
       start: (input) => ipcRenderer.invoke(IPC_CHANNELS.REVIEW_SUBMIT, input),
-      /** 저장된 회차를 검토 대기열에 접수한다. */
+      /** 저장된 회차와 선택 검토 방식을 기존 대기열에 접수한다. */
       submit: (input) => ipcRenderer.invoke(IPC_CHANNELS.REVIEW_SUBMIT, input),
       /** 전체 대기열과 선택 회차의 최신 Job을 읽는다. */
       getQueue: () => ipcRenderer.invoke(IPC_CHANNELS.REVIEW_GET_QUEUE),

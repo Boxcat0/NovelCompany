@@ -141,7 +141,7 @@ async function exerciseEpisodes(mode = "normal") {
   click("검토부에 제출");
   await waitFor(() => document.querySelector('[aria-label="검토"]')?.textContent.includes('제출 상태: 완료'), 'Job completion');
   check(document.querySelector('[aria-label="검토부 대기열"]'), 'Queue panel missing');
-  await waitFor(() => document.body.textContent.includes("Stub 검토 완료: 실제 AI 검토 결과가 아닙니다."), "stub review result");
+  await waitFor(() => document.body.textContent.includes("검토 처리 흐름이 완료되었습니다. 실제 원고 검토는 아직 수행되지 않았습니다."), "stub review result");
   check(!document.body.textContent.includes("문제 없음"), "Stub must not claim no issues");
   await fill("episode-number", "7"); await fill("episode-status", "COMPLETED"); await fill("episode-content", "번호 변경 원고"); await save();
   check(!episode(2) && episode(7), "Number update list");

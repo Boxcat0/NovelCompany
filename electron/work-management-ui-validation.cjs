@@ -150,7 +150,7 @@ async function exerciseWorkManagement() {
   return { confirmations: confirmations.length, checks: "create/update/delete, dependency reason, dirty cancel/discard, Concept/Viewer refresh" };
 }
 
-/** 분리된 DB와 실제 Electron 창에서 Work/Canon lifecycle, 삭제 보호와 재시작을 검증한다. */
+/** 분리된 DB와 sandbox 창에서 lifecycle·Findings 표시·경합·재시작을 검증한다. */
 async function runValidation() {
   let window;
   let exitCode = 0;
@@ -166,7 +166,12 @@ async function runValidation() {
     const episodeStorage = new LocalEpisodeStorage(temporaryRoot);
     registerEpisodeHandlers(ipcMain, episodeStorage);
     registerContextHandlers(ipcMain, episodeStorage);
-    registerReviewHandlers(ipcMain, episodeStorage);
+    let findingFixtureMode = null;
+    // 이 테스트 Main에서만 Processor를 주입하며 Renderer/IPC에는 선택 인자가 없다.
+    const reviewQueue = require('./review/review-queue-service.cjs').createReviewQueue(episodeStorage, key => findingFixtureMode
+      ? require('./review/testing/mock-review-processor.cjs').createMockReviewProcessor(findingFixtureMode)
+      : require('./review/review-processor-selection.cjs').createReviewProcessor(key));
+    registerReviewHandlers(ipcMain, episodeStorage, reviewQueue);
     const { exerciseEpisodes } = require("./episode-ui-validation.cjs");
     const { exerciseCanonAuthoring } = require("./canon-authoring-ui-validation.cjs");
     window = new BrowserWindow({ show: false, width: 1280, height: 900, webPreferences: { preload: path.join(__dirname, "preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false, offscreen: true } });
@@ -300,7 +305,45 @@ async function runValidation() {
     const aliasRaceResult = await window.webContents.executeJavaScript('(' + exerciseAliases.toString() + ')("race")');
     const aliasWorkRaceResult = await window.webContents.executeJavaScript('(' + exerciseAliases.toString() + ')("work-race")');
     const aliasPreviewResult = await window.webContents.executeJavaScript('(' + exerciseAliases.toString() + ')("preview")');
+    const { createFindingFixture, waitFor } = require('./review/review-findings-validation.cjs');
+    const findingFixture = createFindingFixture(episodeStorage);
+    const findingJobs = require('./database/repositories/review-job-repository.cjs');
+    findingFixtureMode = 'MULTIPLE';
+    const findingJob = await reviewQueue.submit({ workId: findingFixture.workId, episodeId: findingFixture.episodes[0].id });
+    await waitFor(() => findingJobs.getById(findingJob.id).status === 'COMPLETED');
+    const findingRunId = findingJobs.getById(findingJob.id).reviewRunId;
+    findingFixtureMode = null;
+    const stubJob = await reviewQueue.submit({ workId: findingFixture.workId, episodeId: findingFixture.episodes[1].id });
+    await waitFor(() => findingJobs.getById(stubJob.id).status === 'COMPLETED');
+    const { exerciseFindings } = require('./review-findings-ui-validation.cjs');
+    const findingsUiResult = await window.webContents.executeJavaScript('(' + exerciseFindings.toString() + ')(' + JSON.stringify(findingRunId) + ')');
+    ipcMain.removeHandler('reviews:get-by-episode');
+    /** 격리 fixture의 첫 회차 응답만 지연하여 기존 request sequence 보호를 확인한다. */
+    ipcMain.handle('reviews:get-by-episode', (_event, input) => require('./ipc/ipc-action.cjs').executeIpcAction('reviews:get-by-episode', async () => {
+      const result = await require('./review/review-service.cjs').getReviewsByEpisode(episodeStorage, input);
+      if (input.episodeId === findingFixture.episodes[0].id) await new Promise(resolve => setTimeout(resolve, 450));
+      return result;
+    }));
+    const findingsRaceResult = await window.webContents.executeJavaScript('(' + exerciseFindings.toString() + ')(' + JSON.stringify(findingRunId) + ', "race")');
+    require('./episode-service.cjs').updateEpisodeWithContent(episodeStorage, findingFixture.episodes[0].id, { workId: findingFixture.workId, episodeNumber: 1, title: '변경된 가상 원고', status: findingFixture.episodes[0].status, content: '현재 수정된 원고' });
+    require('./database/repositories/canon-definition-repository.cjs').deleteCanonForWork(findingFixture.workId);
+    const findingsHistoryResult = await window.webContents.executeJavaScript('(' + exerciseFindings.toString() + ')(' + JSON.stringify(findingRunId) + ', "history")');
+    const ruleFixture = require('./review/testing/rule-review-fixtures.cjs').createRuleFixture(episodeStorage, 'Task030 UI 작품');
+    const { exerciseRuleReview } = require('./rule-review-ui-validation.cjs');
+    const ruleUiResult = await window.webContents.executeJavaScript('(' + exerciseRuleReview.toString() + ')()');
+    ipcMain.removeHandler('reviews:get-by-episode');
+    /** 규칙 결과의 첫 회차 응답을 지연해 회차 변경 후 다른 결과가 섞이지 않는지 확인한다. */
+    ipcMain.handle('reviews:get-by-episode', (_event, input) => require('./ipc/ipc-action.cjs').executeIpcAction('reviews:get-by-episode', async () => {
+      const result = await require('./review/review-service.cjs').getReviewsByEpisode(episodeStorage, input);
+      if (input.episodeId === ruleFixture.episodes[0].id) await new Promise(resolve => setTimeout(resolve, 450));
+      return result;
+    }));
+    const ruleRaceResult = await window.webContents.executeJavaScript('(' + exerciseRuleReview.toString() + ')("race")');
+    require('./database/repositories/canon-definition-repository.cjs').deleteCanonForWork(ruleFixture.workId);
+    assert.deepEqual((await require('./review/review-service.cjs').getReviewById(episodeStorage, ruleUiResult.ruleRunId)).findings, ruleUiResult.history);
     const report = { aliasUiResult, aliasRaceResult, aliasWorkRaceResult, aliasPreviewResult, contextRaceResult, queueUiResult, authoringResult, authoringRaceResult, authoringScreenshotPath, episodeResult, episodeScreenshotPath, result: "PASS", ...result, canonResult, deletionResult, persistence: "DB connection reopen + Renderer reload", screenshotPath, canonScreenshotPath, emptyScreenshotPath, deletionScreenshotPath, temporaryRoot, database: "isolated temporary DB" };
+    Object.assign(report, { findingsUiResult, findingsRaceResult, findingsHistoryResult });
+    Object.assign(report, { ruleUiResult, ruleRaceResult });
     fs.writeFileSync(path.join(artifactsRoot, "result.json"), JSON.stringify(report, null, 2));
     console.log(JSON.stringify(report));
   } catch (error) {

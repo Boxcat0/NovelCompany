@@ -1,3 +1,4 @@
+const { completeLegacyRun } = require('../review/testing/finding-fixtures.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -57,7 +58,7 @@ async function validateCurrent(root) {
   const oldV1Hash = buildRelevantCanonHash(buildReviewContext(await buildEpisodeWorkContext(storage, input), [], null), 'V1');
   const full = await buildEpisodeWorkContext(storage, input);
   const oldRun = reviewRepository.createRun({ workId, episodeId: episode.id, processorKey: 'STUB_V1', episodeContentHash: buildEpisodeContentHash(full), canonContextHash: oldV1Hash, contextMode: 'RELEVANT_CANON_V1' });
-  reviewRepository.completeRun(oldRun.id, []);
+  completeLegacyRun(oldRun.id, []);
   const newRun = await startEpisodeReview(storage, input);
   assert.equal(newRun.source.fingerprintVersion, 'V2');
   assert.equal(newRun.freshness.isCurrent, true);
@@ -89,7 +90,7 @@ function validateUpgrade(root) {
   closeDatabase();
   initializeDatabase(file);
   const upgraded = getDatabase();
-  assert.equal(upgraded.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count, 12);
+  assert.equal(upgraded.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count, 14);
   const newField = getCanonDefinitionBySetId(scope.skill.setId).fields.find(item => item.key === 'required_attribute');
   assert.equal(newField.referenceSet.id, scope.attribute.setId);
   assert.deepEqual(upgraded.prepare('SELECT * FROM canon_records WHERE id = ?').get(oldSkill.id), recordBefore);
@@ -129,7 +130,7 @@ function validateBackupFailure(root) {
   assert.throws(() => initializeDatabase(file));
   const readonly = new DatabaseSync(file, { readOnly: true });
   try {
-    assert.equal(readonly.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count, 10);
+    assert.equal(readonly.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count, 12);
     assert.equal(readonly.prepare("SELECT COUNT(*) count FROM canon_fields WHERE canon_set_id = ? AND key = 'required_attribute'").get(scope.skill.setId).count, 0);
   } finally { readonly.close(); }
 }

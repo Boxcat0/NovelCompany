@@ -1,6 +1,7 @@
 const { buildEpisodeWorkContext } = require('./episode-work-context-builder.cjs');
 const { applySceneNarration } = require('./scene-narration.cjs');
 const { resolveCharacterNames, NAME_RESOLUTION_VERSION } = require('./character-name-resolver.cjs');
+const { buildCanonReferenceCoverage } = require('./canon-reference-coverage.cjs');
 const SET_KEYS = new Set(['character', 'location', 'world', 'organization', 'attribute', 'skill', 'passive', 'authority', 'servant', 'relationship', 'contract']);
 const CHARACTER_FIELDS = new Set(['origin_world', 'origin_location', 'current_location', 'organization', 'attributes', 'skills', 'passives']);
 
@@ -78,7 +79,7 @@ function parseSceneLayout(content, parsed = parseNotation(content)) {
   });
 }
 
-/** FULL_CANON의 기존 선택·소유 판정은 유지하고 작가의 버전 일치 POV만 별도 입력으로 추가한다. */
+/** 기존 선택·소유·POV를 유지하고 선택 Character의 전체 참조 목록을 별도 완전성 정보로 표시한다. */
 function buildReviewContext(workContext, narrationRows = [], nameResolutionVersion = NAME_RESOLUTION_VERSION) {
   if (nameResolutionVersion !== null && nameResolutionVersion !== NAME_RESOLUTION_VERSION) throw new Error('Unsupported name-resolution version.');
   if (workContext.scope !== 'FULL_CANON') throw new Error('FULL_CANON context is required');
@@ -170,7 +171,7 @@ function buildReviewContext(workContext, narrationRows = [], nameResolutionVersi
   for (const scene of scenes.filter(scene => scene.narration.status === 'NARRATOR_DELETED')) warnings.push({ range: scene.originalRange, message: '지정한 서술자 Canon이 삭제되었거나 유효하지 않습니다. 장면 시점을 다시 확인해 주세요.' });
   if (snapshot.hasStaleMetadata && scenes.some(scene => scene.narration.source === 'UNSET')) warnings.push({ range: { start: 0, end: content.length }, message: '원고 또는 장면 구조가 변경되어 기존 장면 시점 설정을 자동 적용할 수 없습니다. 현재 장면의 시점을 다시 확인해 주세요.' });
   const { scenes: _scenes, ...sceneMetadata } = snapshot;
-  return { scope: 'RELEVANT_CANON', selectorVersion: nameResolutionVersion ? 'RELEVANT_CANON_V3' : 'RELEVANT_CANON_V2', nameResolutionVersion, nameMentions, rangeUnit: 'UTF16_HALF_OPEN', work: { ...workContext.work }, episode: { ...workContext.episode }, sceneMetadata, scenes, relevantCanon: { selectedSets, selectedRecords, selectionReasons: reasons }, abilityOwnershipChecks: checks, unresolvedMentions, warnings };
+  return { scope: 'RELEVANT_CANON', selectorVersion: nameResolutionVersion ? 'RELEVANT_CANON_V3' : 'RELEVANT_CANON_V2', nameResolutionVersion, nameMentions, rangeUnit: 'UTF16_HALF_OPEN', work: { ...workContext.work }, episode: { ...workContext.episode }, sceneMetadata, scenes, relevantCanon: { selectedSets, selectedRecords, selectionReasons: reasons }, canonReferenceCoverage: buildCanonReferenceCoverage(workContext.work.id, selectedRecords), abilityOwnershipChecks: checks, unresolvedMentions, warnings };
 }
 
 /** Preview와 Review 실행이 같은 WorkContext 출발점과 순수 분석 함수를 사용하게 한다. */

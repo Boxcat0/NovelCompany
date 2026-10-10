@@ -1,5 +1,21 @@
 # NovelCompany 개발 계획
 
+## Task030 — Rule-based Canon Review V1
+
+RULE_V1과 CHARACTER_SKILL_ATTRIBUTE_MISMATCH_V1 규칙을 추가했다. 실제 Generic Canon의 Character.skills/attributes 및 Skill.required_attribute를 Record ID로 비교하며 완전한 목록과 선택된 Record를 확인할 수 있는 관계만 검사한다. 누락·부분 데이터·Legacy 미설정은 판단을 건너뛰고 중복 관계는 한 번만 보고한다. 결과는 기존 V1 계약의 CANON/WARNING/DETERMINISTIC 근거이며 실제 Skill 사용자나 작품 오류를 확정하지 않는다.
+
+STUB_V1 기본값과 기존 Queue를 유지하고 명시적 RULE 선택을 Main에서 검증한다. Migration 014는 백업 후 Job의 Processor 선택을 영속·불변으로 저장한다. 기존 Run/Finding/hash, Alias/POV/ownership, FIFO·Episode Lock 및 실패 원자성을 보존한다. WorksScreen에서 방식 선택과 제한된 검사 범위·근거를 표시한다. `test:rule-review`는 격리 DB에서 규칙·누락·오탐·계약·순서·IPC·Queue·실패·재시작·migration·Legacy를, `test:work-ui`는 sandbox에서 선택·실제 Finding·0건 문구·dirty·지연 응답·이력 snapshot을 확인한다.
+
+향후 AI Review는 문맥상 사용자 추론과 속성 관계 판단을 분리하고 예외 설정을 검토해야 한다. 실제 AI 호출, 자동 Speaker/사용자 추론, Finding 승인·기각 및 TXT/Canon 자동 수정은 구현하지 않는다.
+
+## Task029 — Review Findings Contract V1 & Isolated Mock Processor
+
+버전 결과 계약, 독립 Severity/Assessment, TEXT_RANGE/CANON_RECORD, 실행 Context 기준 전체 검증, 최소 Canon/명칭 후보/소속 snapshot과 불변 근거 저장을 구현했다. Migration 013은 백업 후 기존 review_findings를 확장하며 Legacy와 기존 입력 fingerprint를 보존한다. Findings·Run·Job의 원자 완료 및 실패·복구 정책을 유지한다.
+
+운영 기본은 빈 결과의 STUB_V1이며 실제 원고 검토를 수행하지 않았다고 안내한다. MOCK_V1은 테스트 Main의 가상 fixture 전용으로 패키징에서 제외한다. WorksScreen의 결과 상세는 안전한 텍스트로 당시 근거와 후보를 표시하고 회차 전환의 지연 응답을 폐기한다. `test:review-findings`는 계약·범위·Canon 역할·저장 실패·FIFO·잠금·재시작·이력 불변성·migration 백업/Legacy를, `test:work-ui`는 sandbox에서 표시·HTML 안전성·Mock IPC 선택 거부·race·과거 근거를 검증한다.
+
+Processor Adapter는 Context만 입력받아 V1 Draft를 반환하고 같은 검증과 transaction을 사용해야 한다. 규칙 Processor는 Task030에서 추가한다. 문맥상 실제 사용자/화자 추론과 속성 적합성은 별도 판단 단계이며 Canon 사실로 자동 저장하지 않는다. 실제 AI 호출, Finding 승인·기각, TXT/Canon 자동 수정은 구현하지 않는다.
+
 ## Task028 — Character Alias Management & Name Resolution
 
 저장된 Character의 선택적 Alias CRUD, Character별 NFC 중복 방지, 다른 Character의 동일 별칭 허용을 구현했다. Work/CanonSpace/character 범위 검증과 cascade 삭제를 적용한다. 기존 Dynamic Form을 유지하고 별칭 작업으로 Character draft가 사라지지 않게 하며 Character/Work 전환의 지연 응답을 폐기한다.

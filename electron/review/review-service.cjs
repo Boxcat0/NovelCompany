@@ -10,7 +10,7 @@ const { buildSceneMetadataHash } = require('../context/scene-narration.cjs');
 const narrationRepository = require('../database/repositories/scene-narration-repository.cjs');
 const { NAME_RESOLUTION_VERSION } = require('../context/character-name-normalization.cjs');
 
-const findingCategories = new Set(["TYPO", "SPACING", "GRAMMAR", "CANON", "OTHER"]);
+const { executeReviewProcessor } = require('./review-findings-contract.cjs');
 
 /** 기존 Canon hash에서 Alias 확장을 제외하고 버전별 구조화 입력을 SHA-256으로 지문화한다. */
 function buildCanonContextHash(canonContext) {
@@ -47,21 +47,10 @@ function buildEpisodeContentHash(workContext) {
   return workContext.episode.contentHash ?? createHash("sha256").update(workContext.episode.content, "utf8").digest("hex");
 }
 
-/** Processor 결과가 finding contract만 포함하며 저장 가능한 public 값인지 확인한다. */
-function validateReviewResult(result) {
-  if (!result || typeof result !== "object" || !Array.isArray(result.findings)) {
-    throw new RepositoryError("REVIEW_RESULT_INVALID", "검토 결과 형식이 올바르지 않습니다.");
-  }
-  return result.findings.map((finding) => {
-    if (!finding || typeof finding !== "object" || !findingCategories.has(finding.category) || typeof finding.message !== "string" || finding.message.trim().length === 0) {
-      throw new RepositoryError("REVIEW_RESULT_INVALID", "검토 결과 형식이 올바르지 않습니다.");
-    }
-    return { category: finding.category, message: finding.message.trim() };
-  });
-}
-
-/** 저장 모드·fingerprint 버전으로 비교하고 원고 변경 시 독립 Canon 변경 여부는 미확정으로 남긴다. */
+/** 기존 입력 버전으로 현재성을 비교하며 비교 불가 상태와 저장 당시 Finding을 함께 제공한다. */
 function toPublicReview(run, currentSource) {
+  const unavailable = currentSource === null;
+  currentSource ??= {};
   const episodeChanged = run.episodeContentHash !== currentSource.episodeContentHash;
   const contextMode = run.contextMode ?? 'FULL_CANON_V1';
   const relevant = contextMode === 'RELEVANT_CANON_V1';
@@ -78,46 +67,54 @@ function toPublicReview(run, currentSource) {
     episodeId: run.episodeId,
     status: run.status,
     processorKey: run.processorKey,
+    contractVersion: run.contractVersion ?? null,
     source: { episodeContentHash: run.episodeContentHash, canonContextHash: run.canonContextHash, contextMode, fingerprintVersion, nameResolutionVersion: run.nameResolutionVersion ?? null, sceneMetadataHash: run.sceneMetadataHash ?? null, sceneMetadataVersion: run.sceneMetadataVersion ?? null },
-    freshness: { isCurrent: !episodeChanged && !contextChanged && !sceneMetadataChanged, episodeChanged, canonChanged, contextChanged, canonComparison, sceneMetadataChanged, sceneMetadataComparison },
-    findings: run.findings.map(({ id, category, message, sortOrder, createdAt }) => ({ id, category, message, sortOrder, createdAt })),
+    freshness: unavailable ? { isCurrent: false, episodeChanged: null, canonChanged: null, contextChanged: null, canonComparison: 'UNAVAILABLE', sceneMetadataChanged: null, sceneMetadataComparison: 'UNAVAILABLE' } : { isCurrent: !episodeChanged && !contextChanged && !sceneMetadataChanged, episodeChanged, canonChanged, contextChanged, canonComparison, sceneMetadataChanged, sceneMetadataComparison },
+    findings: run.findings,
     createdAt: run.createdAt,
     startedAt: run.startedAt,
     completedAt: run.completedAt,
   };
 }
 
-/** V2 ReviewContext를 먼저 구성한 뒤 버전을 고정한 RUNNING Run과 Stub 결과를 실행한다. */
+/** 내부 격리 실행에서 Context 복사본을 전달하고 검증된 결과만 Run에 저장한다. */
 async function startEpisodeReview(episodeStorage, input, processor = createStubReviewProcessor()) {
   const workContext = await buildEpisodeWorkContext(episodeStorage, input);
   const source = buildCurrentSource(workContext);
   const run = repository.createRun({ workId: workContext.work.id, episodeId: workContext.episode.id, processorKey: processor.processorKey, episodeContentHash: source.episodeContentHash, canonContextHash: source.canonContextHash, contextMode: 'RELEVANT_CANON_V1', fingerprintVersion: 'V2', nameResolutionVersion: source.nameResolutionVersion, sceneMetadataHash: source.sceneMetadataHash, sceneMetadataVersion: source.sceneMetadataVersion });
   try {
-    const findings = validateReviewResult(await processor.review(source.reviewContext));
+    const findings = await executeReviewProcessor(processor, source.reviewContext);
     return toPublicReview(repository.completeRun(run.id, findings), source);
   } catch (cause) {
-    const code = cause instanceof RepositoryError && cause.code === "REVIEW_RESULT_INVALID" ? cause.code : "REVIEW_FAILED";
+    const code = cause instanceof RepositoryError && ["REVIEW_RESULT_INVALID", "REVIEW_FINDING_RANGE_INVALID", "REVIEW_FINDING_CANON_INVALID"].includes(cause.code) ? cause.code : "REVIEW_FAILED";
     try { repository.failRun(run.id, code); }
     catch (failureCause) { logIpcError({ channel: "reviews:start", code: "REVIEW_FAILED", message: "검토 작업을 완료하지 못했습니다.", cause: failureCause }); }
-    if (cause instanceof RepositoryError && cause.code === "REVIEW_RESULT_INVALID") throw cause;
-    logIpcError({ channel: "reviews:start", code, message: "검토 작업을 완료하지 못했습니다.", cause });
-    throw new RepositoryError("REVIEW_FAILED", "검토 작업을 완료하지 못했습니다.", cause);
+    if (cause instanceof RepositoryError && ["REVIEW_RESULT_INVALID", "REVIEW_FINDING_RANGE_INVALID", "REVIEW_FINDING_CANON_INVALID"].includes(cause.code)) throw cause;
+    logIpcError({ channel: "reviews:start", code, message: "검토 작업을 완료하지 못했습니다." });
+    throw new RepositoryError("REVIEW_FAILED", "검토 작업을 완료하지 못했습니다.");
   }
 }
 
-/** 현재 Context를 한 번 읽고 각 history의 저장된 FULL/RELEVANT 모드로 freshness를 계산한다. */
-async function getReviewsByEpisode(episodeStorage, input) {
-  const workContext = await buildEpisodeWorkContext(episodeStorage, input);
-  const source = buildCurrentSource(workContext);
-  return repository.getByEpisode({ workId: workContext.work.id, episodeId: workContext.episode.id }).map((run) => toPublicReview(run, source));
+/** 현재 원고·Canon 비교가 불가능해도 과거 근거의 조회는 허용한다. */
+async function currentSourceForHistory(episodeStorage, input) {
+  try { return buildCurrentSource(await buildEpisodeWorkContext(episodeStorage, input)); }
+  catch (error) {
+    if (['CANON_SPACE_NOT_FOUND', 'EPISODE_CONTENT_NOT_FOUND', 'EPISODE_CONTENT_HASH_MISMATCH', 'EPISODE_CONTENT_READ_FAILED', 'CONTEXT_CANON_REFERENCE_INVALID', 'CONTEXT_CANON_OPTION_INVALID'].includes(error.code)) return null;
+    throw error;
+  }
 }
 
-/** Run identity에서 현재 Context를 읽고 저장된 모드에 맞는 단일 history freshness를 제공한다. */
+/** 동일 Episode의 이력을 읽고 현재 입력이 있으면 기존 버전으로 현재성을 비교한다. */
+async function getReviewsByEpisode(episodeStorage, input) {
+  const source = await currentSourceForHistory(episodeStorage, input);
+  return repository.getByEpisode(input).map(run => toPublicReview(run, source));
+}
+
+/** Run별 저장된 근거를 조회하며 Canon 삭제로 과거 조회가 차단되지 않게 한다. */
 async function getReviewById(episodeStorage, reviewRunId) {
   const run = repository.getById(reviewRunId);
-  if (!run) throw new RepositoryError("REVIEW_RUN_NOT_FOUND", "검토 실행 결과를 찾을 수 없습니다.");
-  const workContext = await buildEpisodeWorkContext(episodeStorage, { workId: run.workId, episodeId: run.episodeId });
-  return toPublicReview(run, buildCurrentSource(workContext));
+  if (!run) throw new RepositoryError('REVIEW_RUN_NOT_FOUND', '검토 실행 결과를 찾을 수 없습니다.');
+  return toPublicReview(run, await currentSourceForHistory(episodeStorage, { workId: run.workId, episodeId: run.episodeId }));
 }
 
-module.exports = { buildRelevantCanonHash, buildCurrentSource, buildCanonContextHash, buildEpisodeContentHash, canonicalStringify, getReviewById, getReviewsByEpisode, startEpisodeReview, toPublicReview, validateReviewResult };
+module.exports = { buildRelevantCanonHash, buildCurrentSource, buildCanonContextHash, buildEpisodeContentHash, canonicalStringify, getReviewById, getReviewsByEpisode, startEpisodeReview, toPublicReview };

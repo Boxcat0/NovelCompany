@@ -101,7 +101,7 @@ export type WorkContext = {
   };
 };
 
-export type ReviewFindingCategory = "TYPO" | "SPACING" | "GRAMMAR" | "CANON" | "OTHER";
+export type ReviewFindingCategory = "TEXT" | "NARRATION" | "NAME_RESOLUTION" | "CONTINUITY" | "TYPO" | "SPACING" | "GRAMMAR" | "CANON" | "OTHER";
 export type SourceRange = { start: number; end: number };
 export type NarrationMode = 'FIRST_PERSON_CHARACTER' | 'EXTERNAL_THIRD_PERSON' | 'UNKNOWN';
 export type SceneNarration = { mode: NarrationMode; source: 'AUTHOR_SET' | 'UNSET'; narratorCharacter: WorkContextReference | null; status: 'VALID' | 'NARRATOR_DELETED' };
@@ -110,6 +110,7 @@ export type SaveSceneNarrationInput = { workId: string; episodeId: string; expec
 export type CanonResolution = { status: 'MATCHED' | 'NOT_FOUND' | 'AMBIGUOUS' | 'UNRESOLVED'; recordId: string | null; candidateIds: string[] };
 export type NotationOccurrence = { type: string; raw: string; range: SourceRange; quoteContext: string | null; canonType?: string; resolution?: CanonResolution };
 export type ReviewContext = {
+  canonReferenceCoverage?: { version: 'CANON_REFERENCE_LISTS_V1'; workId: string; characters: Array<{ recordId: string; fields: Partial<Record<'attributes' | 'skills', { complete: true; recordIds: string[] }>> }> };
   nameResolutionVersion: 'CHARACTER_NAMES_V1' | null;
   nameMentions: Array<{ text: string; normalizedName: string; sceneIndex: number; sceneIdentity: string; range: SourceRange; quoteContext: string | null; status: 'MATCHED' | 'AMBIGUOUS'; recordId: string | null; candidateIds: string[]; certainty: 'REGISTERED_NAME_CANDIDATES'; candidates: Array<{ recordId: string; displayName: string; matchTypes: Array<'DISPLAY_NAME' | 'REGISTERED_ALIAS'>; organization: WorkContextReference | null }> }>;
   sceneMetadata: Omit<SceneNarrationSnapshot, 'workId' | 'episodeId' | 'characters' | 'scenes'>;
@@ -121,22 +122,36 @@ export type ReviewContext = {
   unresolvedMentions: Array<{ raw: string; range: SourceRange; sceneIndex: number; status: 'UNKNOWN' | 'AMBIGUOUS'; candidateIds: string[] }>;
   warnings: Array<{ range: SourceRange; message: string }>;
 };
-export type ReviewFinding = { id: string; category: ReviewFindingCategory; message: string; sortOrder: number; createdAt: string };
+export type FindingCanonReference = {
+  recordId: string; setKey: string; displayNameAtReview: string;
+  referenceRole: 'CONTEXT_RECORD' | 'NAME_CANDIDATE' | 'AMBIGUOUS_CANDIDATE';
+  mentionIndex?: number;
+  mention?: { text: string; range: SourceRange; sceneIdentity: string; status: 'MATCHED' | 'AMBIGUOUS' };
+  organization?: { recordId: string; setKey: string; displayNameAtReview: string } | null;
+};
+export type FindingAnchor = { type: 'TEXT_RANGE'; range: SourceRange; sceneIdentity: string | null; sourceExcerpt: string } | { type: 'CANON_RECORD' };
+export type ReviewFinding = { id: string; reviewRunId: string; category: ReviewFindingCategory; message: string; sortOrder: number; createdAt: string } & (
+  { contractVersion: null } |
+  { contractVersion: 'REVIEW_FINDINGS_V1'; severity: 'INFO' | 'WARNING' | 'ERROR'; assessment: 'DETERMINISTIC' | 'INFERENCE_CANDIDATE' | 'UNDETERMINED'; anchor: FindingAnchor; evidence: string; suggestion: string | null; relatedCanonRecords: FindingCanonReference[]; provenance: { processorKey: string } }
+);
 export type ReviewRun = {
   id: string;
   workId: string;
   episodeId: string;
   status: "RUNNING" | "COMPLETED" | "FAILED";
   processorKey: string;
+  contractVersion: 'REVIEW_FINDINGS_V1' | null;
   source: { nameResolutionVersion: 'CHARACTER_NAMES_V1' | null; sceneMetadataHash: string | null; sceneMetadataVersion: string | null; episodeContentHash: string; canonContextHash: string; contextMode: 'FULL_CANON_V1' | 'RELEVANT_CANON_V1'; fingerprintVersion: 'V1' | 'V2' };
-  freshness: { sceneMetadataChanged: boolean; sceneMetadataComparison: 'CURRENT' | 'CHANGED' | 'LEGACY_NOT_TRACKED' | 'UNDETERMINED_EPISODE_CHANGED'; isCurrent: boolean; episodeChanged: boolean; canonChanged: boolean; contextChanged: boolean; canonComparison: 'COMPARABLE' | 'UNDETERMINED_EPISODE_CHANGED' };
+  freshness: { sceneMetadataChanged: boolean | null; sceneMetadataComparison: 'CURRENT' | 'CHANGED' | 'LEGACY_NOT_TRACKED' | 'UNDETERMINED_EPISODE_CHANGED' | 'UNAVAILABLE'; isCurrent: boolean; episodeChanged: boolean | null; canonChanged: boolean | null; contextChanged: boolean | null; canonComparison: 'COMPARABLE' | 'UNDETERMINED_EPISODE_CHANGED' | 'UNAVAILABLE' };
   findings: ReviewFinding[];
   createdAt: string;
   startedAt: string;
   completedAt: string | null;
 };
 export type ReviewJobStatus = 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'RESUBMIT_REQUIRED';
-export type ReviewJob = { nameResolutionVersion: 'CHARACTER_NAMES_V1' | null; sceneMetadataHash: string | null; sceneMetadataVersion: string | null; id: string; workId: string; episodeId: string; queueSequence: number; status: ReviewJobStatus; episodeContentHash: string; canonContextHash: string; contextMode: 'RELEVANT_CANON_V1'; fingerprintVersion: 'V2'; reviewRunId: string | null; errorCode: string | null; errorMessage: string | null; createdAt: string; startedAt: string | null; completedAt: string | null; workTitle: string; episodeNumber: number; episodeTitle: string };
+export type ReviewProcessorKey = 'STUB_V1' | 'RULE_V1';
+export type ReviewSubmissionInput = { workId: string; episodeId: string; processorKey?: ReviewProcessorKey };
+export type ReviewJob = { processorKey: ReviewProcessorKey; nameResolutionVersion: 'CHARACTER_NAMES_V1' | null; sceneMetadataHash: string | null; sceneMetadataVersion: string | null; id: string; workId: string; episodeId: string; queueSequence: number; status: ReviewJobStatus; episodeContentHash: string; canonContextHash: string; contextMode: 'RELEVANT_CANON_V1'; fingerprintVersion: 'V2'; reviewRunId: string | null; errorCode: string | null; errorMessage: string | null; createdAt: string; startedAt: string | null; completedAt: string | null; workTitle: string; episodeNumber: number; episodeTitle: string };
 export type ReviewQueue = { running: ReviewJob[]; queued: ReviewJob[]; recent: ReviewJob[] };
 
 export type CreateWorkInput = {
@@ -226,8 +241,8 @@ export interface NovelCompanyApi {
     }): Promise<IpcResult<WorkContext>>;
   };
   reviews: {
-    start(input: { workId: string; episodeId: string }): Promise<IpcResult<ReviewJob>>;
-    submit(input: { workId: string; episodeId: string }): Promise<IpcResult<ReviewJob>>;
+    start(input: ReviewSubmissionInput): Promise<IpcResult<ReviewJob>>;
+    submit(input: ReviewSubmissionInput): Promise<IpcResult<ReviewJob>>;
     getQueue(): Promise<IpcResult<ReviewQueue>>;
     getJobByEpisode(input: { workId: string; episodeId: string }): Promise<IpcResult<ReviewJob | null>>;
     cancelQueued(reviewJobId: string): Promise<IpcResult<ReviewJob>>;

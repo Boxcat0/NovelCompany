@@ -1,4 +1,4 @@
-/** 실제 sandbox Renderer에서 Alias CRUD·Character draft·지연 응답·후보 Preview를 검증한다. */
+/** sandbox Renderer에서 Alias CRUD·draft·후보 Preview 및 실제 검토를 하지 않은 Stub 안내를 검증한다. */
 async function exerciseAliases(mode = 'normal') {
   /** React 상태와 Main 응답을 목표 조건까지 기다린다. */
   async function waitFor(check, label) { const deadline = Date.now() + 10000; await new Promise(resolve => setTimeout(resolve, 40)); while (!check()) { if (Date.now() > deadline) throw new Error('Alias UI: ' + label); await new Promise(resolve => setTimeout(resolve, 30)); } }
@@ -30,8 +30,8 @@ async function exerciseAliases(mode = 'normal') {
     check(preview.textContent.includes('한지수 — 제1기사단') && preview.textContent.includes('이카로스 — 제2기사단'), 'Candidate organization missing');
     check(preview.textContent.includes('실제 지시 대상은 아직 확정되지'), 'Candidate uncertainty missing');
     click('검토부에 제출'); await waitFor(() => document.querySelector('[aria-label="검토"]')?.textContent.includes('제출 상태: 완료'), 'Stub completed');
-    await waitFor(() => document.body.textContent.includes('실제 AI 검토 결과가 아닙니다'), 'Stub history loaded');
-    check(document.body.textContent.includes('실제 AI 검토 결과가 아닙니다'), 'Stub disclaimer missing');
+    await waitFor(() => document.body.textContent.includes('실제 원고 검토는 아직 수행되지 않았습니다.'), 'Stub history loaded');
+    check(document.body.textContent.includes('실제 원고 검토는 아직 수행되지 않았습니다.'), 'Stub disclaimer missing');
     return { ambiguousPreview: true };
   }
   await waitFor(() => document.querySelector('[aria-label="설정 분류"]') && !document.querySelector('.back-button').disabled, 'Canon sets');

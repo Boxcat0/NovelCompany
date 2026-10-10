@@ -1,5 +1,27 @@
 # NovelCompany 데이터 모델 설계
 
+## Task030 — Job Processor 선택과 Rule 근거
+
+Migration `014_add_review_job_processor.sql`은 `review_jobs.processor_key TEXT NOT NULL DEFAULT 'STUB_V1'`을 추가한다. CHECK는 STUB_V1/RULE_V1만 허용하고 `review_job_processor_immutable` trigger는 제출 후 키 변경을 거부한다. 기존 Job은 STUB_V1로 해석하며 기존 Run.processor_key·Finding·source hash는 그대로 보존한다. 013 DB는 `backups/before-task030-<UUID>.db`에 VACUUM INTO 백업한 뒤 적용하며 백업 실패 시 migration도 중단한다. 기존 migration은 수정하지 않는다.
+
+제출 DTO는 `{ workId, episodeId, processorKey?: 'STUB_V1'|'RULE_V1' }`, Job DTO는 processorKey를 포함한다. Worker는 저장된 키로 Processor를 만들고 운영 Processor의 키와 Job 키를 claim transaction 안에서 대조한다. 실제 실행 키는 기존 Run.processor_key와 V1 Finding provenance.processorKey에 기록한다.
+
+ReviewContext의 선택적 파생 `canonReferenceCoverage = { version: 'CANON_REFERENCE_LISTS_V1', workId, characters: [{ recordId, fields: { attributes?: { complete: true, recordIds }, skills?: { complete: true, recordIds } } }] }`는 전체 로더에서 축약 없이 복사한 선택 Character 목록을 확인한다. 누락·중복·잘못된 Set·확인 정보와 다른 ID 목록은 완전한 목록으로 취급하지 않는다. Legacy Context에 확인 정보가 없으면 RULE_V1은 판단을 건너뛴다. 이 정보는 DB에 저장하거나 hash 입력에 추가하지 않는다.
+
+RULE_V1 Finding은 기존 REVIEW_FINDINGS_V1 구조를 사용한다. category=CANON, severity=WARNING, assessment=DETERMINISTIC, anchor={type:'CANON_RECORD'}이며 evidence에 규칙 ID/버전/Processor/검사 범위와 Character·Skill·보유 Attribute 전체·Required Attribute의 이름과 ID를 남긴다. relatedCanonRecords는 당시 최소 식별 snapshot이고 실제 사용자 확정 정보가 아니다. 전용 Rule 테이블이나 Canon/TXT 수정은 없다.
+
+## Task029 — Review Findings Contract V1
+
+Migration `013_extend_review_findings_contract.sql`은 기존 `review_runs.findings_contract_version`, `review_findings.contract_version`, `review_findings.details_json` 세 nullable 컬럼만 추가한다. 버전은 null 또는 REVIEW_FINDINGS_V1이다. 기존 id/review_run_id/category/message/sort_order/created_at 및 인덱스·FK를 재사용한다. 테이블 재생성·기존 값 backfill·hash 재작성은 하지 않는다. 012 DB는 `before-task029-<UUID>.db`로 VACUUM INTO 백업한 뒤 migration하며 백업 실패 시 중단한다.
+
+Processor Result는 `{ contractVersion, findings }`. Draft의 필수 키는 `{ category, severity, assessment, anchor, evidence, message, suggestion, relatedCanonRecords }`다. suggestion은 null을 허용한다. category는 TEXT/CANON/NARRATION/NAME_RESOLUTION/CONTINUITY/OTHER 및 기존 TYPO/SPACING/GRAMMAR를 허용한다. severity는 INFO/WARNING/ERROR, assessment는 DETERMINISTIC/INFERENCE_CANDIDATE/UNDETERMINED다.
+
+anchor는 `{ type: 'TEXT_RANGE', range: { start, end }, sceneIdentity: string|null, sourceExcerpt: string }` 또는 `{ type: 'CANON_RECORD' }`다. UTF-16 정수 범위는 0 ≤ start < end ≤ content.length이며 LF/CRLF/Unicode를 정규화하지 않는다. evidence는 근거 설명 문자열이다. 한도는 Finding 100건, Finding별 Canon 참조 100건, message 2,000 / evidence 8,000 / suggestion 4,000 / excerpt 16,000 UTF-16 단위, 직렬화된 Result 전체 500,000 단위다. 빈 문자열·잘못된 타입·희소 배열·알 수 없는 키는 거부한다.
+
+Canon Draft는 `{ recordId, setKey, referenceRole, mentionIndex? }`. role은 CONTEXT_RECORD/NAME_CANDIDATE/AMBIGUOUS_CANDIDATE이며 이름 후보에만 실행 Context nameMentions의 index를 요구한다. 저장 DTO는 Context에서 추출한 `displayNameAtReview`를 추가하며 후보에는 mention(text/range/sceneIdentity/status), organization(recordId/setKey/displayNameAtReview 또는 null)을 보존한다. Canon 전체 값과 현재 Canon FK를 복제하지 않아 Record/Canon 삭제가 과거 근거를 제거하지 않는다. 명시된 최소 식별 정보가 없는 후보 ID는 허용하지 않는다.
+
+Public Finding은 기존 기본 컬럼(id/reviewRunId/category/message/sortOrder/createdAt)에 contractVersion과 details(severity/assessment/anchor/evidence/suggestion/relatedCanonRecords/provenance)를 합친다. provenance는 `{ processorKey }`로 실행 설정과 Run의 키가 일치해야 한다. Legacy Finding은 contractVersion=null이며 신규 판단 필드가 없다. 신규 결과가 검증·저장 완료되지 않은 Run도 contractVersion=null이다. Run source의 episode hash가 당시 발췌와 연결된다. 현재 입력을 읽을 수 없으면 freshness.isCurrent=false, 변경 여부는 null, 비교는 UNAVAILABLE다. 이는 과거 내용 변경을 뜻하지 않는다.
+
 ## Task028 — canon_record_aliases와 이름 해석 버전
 
 Migration `012_add_canon_record_aliases.sql`은 `canon_record_aliases(id, canon_record_id, alias_text, normalized_alias, created_at, updated_at)`를 추가한다. canon_record_id는 Generic canon_records FK ON DELETE CASCADE다. UNIQUE는 `(canon_record_id, normalized_alias)` 범위에만 적용한다. Alias 문자열에 전역 UNIQUE를 두지 않는다. Character-only insert/update trigger와 Repository의 Work/Space/Record/Set 검사로 생성·변경 범위를 제한한다. Legacy Canon 테이블은 사용하지 않는다.
@@ -498,7 +520,7 @@ Task016 Single Source의 원본은 11 Set/30 Field/4 Option이다. 별도 명시
 
 `review_runs`는 `id`, `work_id`, `episode_id`, `status(RUNNING|COMPLETED|FAILED)`, `processor_key`, `episode_content_hash`, `canon_context_hash`, `error_code`, 생성/시작/완료 시각을 보존한다. Work와 Episode FK는 `ON DELETE RESTRICT`이며 cascade를 사용하지 않는다. Episode별 RUNNING Run은 partial unique index로 하나만 허용한다.
 
-`review_findings`는 Run별 immutable 결과로 `id`, `review_run_id`, `category`, `message`, `sort_order`, `created_at`을 보관한다. 원고 본문, WorkContext JSON, Canon JSON은 어느 review table에도 저장하지 않는다. freshness는 저장된 두 hash와 현재 WorkContext에서 한 번 계산한 hash를 비교하는 derived DTO이며 DB status를 STALE로 바꾸지 않는다.
+`review_findings`는 Run별 immutable 결과로 `id`, `review_run_id`, `category`, `message`, `sort_order`, `created_at`을 보관한다. Task029부터 검증된 발췌와 최소 Canon 식별 근거를 추가 보존하며 원고 전체, WorkContext 전체, Canon 전체 JSON은 저장하지 않는다. freshness는 저장된 hash와 현재 Context를 비교하는 derived DTO이며 DB status를 STALE로 바꾸지 않는다.
 
 ## 15. Task023 — Derived WorkContext
 

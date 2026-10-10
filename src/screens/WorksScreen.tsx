@@ -1,3 +1,4 @@
+import { ReviewResultViewer } from '../components/ReviewResultViewer';
 import { SceneNarrationEditor } from '../components/SceneNarrationEditor';
 import { ReviewContextPreview } from '../components/ReviewContextPreview';
 import type { ReviewContext } from '../types/electron-api';
@@ -11,6 +12,7 @@ import type {
   ReviewJob,
   ReviewJobStatus,
   ReviewQueue,
+  ReviewProcessorKey,
   WorkContext,
 } from "../types/electron-api";
 
@@ -60,6 +62,7 @@ function WorksScreen({ onNavigationState }: { onNavigationState?: (dirty: boolea
   const [reviewQueue, setReviewQueue] = useState<ReviewQueue | null>(null);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewStarting, setReviewStarting] = useState(false);
+  const [reviewProcessorKey, setReviewProcessorKey] = useState<ReviewProcessorKey>('STUB_V1');
   const [reviewError, setReviewError] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -108,7 +111,7 @@ function WorksScreen({ onNavigationState }: { onNavigationState?: (dirty: boolea
     return !narrationSaving && !requestPending.current && (!(dirty || narrationDirty) || window.confirm("저장하지 않은 변경사항이 있습니다.\n변경 내용을 버리고 계속하시겠습니까?"));
   }
 
-  /** 이전 TXT 요청을 무효화하고 선택/폼/복구 상태를 모두 초기화한다. */
+  /** 이전 회차 응답을 무효화하고 폼과 검토 방식의 기본값을 초기화한다. */
   function resetEditor() {
     setNarrationDirty(false); setNarrationSaving(false);
     contentRequestIdRef.current++; contextRequestIdRef.current++; reviewRequestIdRef.current++; reviewStartRequestIdRef.current++; setSelectedEpisode(null); setDraft(null); setBaseline("");
@@ -116,6 +119,7 @@ function WorksScreen({ onNavigationState }: { onNavigationState?: (dirty: boolea
     setContextPreview(null); setReviewContextPreview(null); setContextError(""); setContextLoading(false);
     reviewJobRequestIdRef.current++; setReviewJob(null);
     setReviews([]); setReviewError(""); setReviewLoading(false); setReviewStarting(false);
+    setReviewProcessorKey('STUB_V1');
   }
 
   /** 접수 순서가 고정된 전역 검토 대기열을 늦은 응답으로 덮어쓰지 않는다. */
@@ -255,7 +259,7 @@ function WorksScreen({ onNavigationState }: { onNavigationState?: (dirty: boolea
     }
   }
 
-  /** dirty draft를 차단하고 저장된 회차를 검토부 대기열에 접수한다. */
+  /** 미저장 입력을 차단하고 명시적으로 선택한 방식을 포함해 저장된 회차를 제출한다. */
   async function handleStartReview() {
     if (!selectedWork || !selectedEpisode || reviewStarting || busy || reviewLocked) return;
     if (dirty || narrationDirty) {
@@ -266,7 +270,7 @@ function WorksScreen({ onNavigationState }: { onNavigationState?: (dirty: boolea
     const episodeId = selectedEpisode.id;
     setReviewStarting(true); setReviewError("");
     try {
-      readResult(await window.novelCompany.reviews.submit({ workId: selectedWork.id, episodeId }));
+      readResult(await window.novelCompany.reviews.submit({ workId: selectedWork.id, episodeId, processorKey: reviewProcessorKey }));
       if (!mounted.current || requestId !== reviewStartRequestIdRef.current || selectedEpisode.id !== episodeId) return;
       void loadReviewJob(selectedWork.id, episodeId); void loadQueue();
     } catch (cause) {
@@ -363,27 +367,22 @@ function WorksScreen({ onNavigationState }: { onNavigationState?: (dirty: boolea
             {selectedEpisode && <section className="review-panel" aria-label="검토">
               <h3>검토</h3>
               <p>Stub Processor는 실제 문장·Canon 검토를 수행하지 않으며, Review Pipeline 연결 상태만 확인합니다.</p>
+              <label htmlFor="review-processor">검토 방식</label>
+              <select id="review-processor" value={reviewProcessorKey} disabled={busy || reviewLocked} onChange={event => setReviewProcessorKey(event.target.value as ReviewProcessorKey)}>
+                <option value="STUB_V1">검토 파이프라인 점검 — STUB_V1</option>
+                <option value="RULE_V1">Canon 규칙 검토 — RULE_V1</option>
+              </select>
+              {reviewProcessorKey === 'RULE_V1' && <p>현재 회차의 관련 Character에 등록된 스킬·속성 관계만 비교합니다. 정보가 부족한 관계는 판단을 보류하며, 원고의 실제 스킬 사용자는 추론하지 않습니다.</p>}
               <button type="button" disabled={busy || reviewLoading || reviewLocked || dirty || narrationDirty || contentMissing} onClick={() => void handleStartReview()}>{reviewStarting ? "제출 중…" : "검토부에 제출"}</button>
               {dirty && <p>미저장 변경사항을 저장한 뒤 제출할 수 있습니다.</p>}
-              {reviewJob && <p role="status">제출 상태: {reviewJobStatusLabels[reviewJob.status]}{reviewJob.status === 'QUEUED' && queuePosition >= 0 ? ` · 대기 순서 ${queuePosition + 1}` : ''}{reviewJob.errorMessage ? ` · ${reviewJob.errorMessage}` : ''}</p>}
+              {reviewJob && <p role="status">제출 상태: {reviewJobStatusLabels[reviewJob.status]} · 검토 방식: {reviewJob.processorKey}{reviewJob.status === 'QUEUED' && queuePosition >= 0 ? ` · 대기 순서 ${queuePosition + 1}` : ''}{reviewJob.errorMessage ? ` · ${reviewJob.errorMessage}` : ''}</p>}
               {reviewJob?.status === 'QUEUED' && <button type="button" disabled={reviewStarting} onClick={() => void handleCancelReview()}>제출 철회</button>}
               {reviews.length > 0 && <button type="button" onClick={() => void loadReviews(selectedWork.id, selectedEpisode.id)}>Review 결과 확인</button>}
               {reviewQueue && <section aria-label="검토부 대기열"><h4>검토부 대기열</h4><p>현재 작업: {reviewQueue.running.map(item => `${item.workTitle} · ${item.episodeNumber}화`).join(', ') || '없음'}</p><ol>{reviewQueue.queued.map(item => <li key={item.id}>{item.workTitle} · {item.episodeNumber}화 — 대기</li>)}</ol><p>최근 종료: {reviewQueue.recent[0] ? `${reviewQueue.recent[0].workTitle} · ${reviewQueue.recent[0].episodeNumber}화 — ${reviewJobStatusLabels[reviewQueue.recent[0].status]}` : '없음'}</p></section>}
               {reviewError && <p className="error-message" role="alert">{reviewError}</p>}
               {reviewLoading && <p role="status">검토 기록을 불러오는 중입니다.</p>}
               {!reviewLoading && reviews.length === 0 && <p>최근 검토가 없습니다.</p>}
-              {!reviewLoading && reviews.length > 0 && <ul className="review-history">
-                {reviews.map((review) => <li key={review.id}>
-                  <strong>{review.status === 'RUNNING' ? '검토 중' : review.status === 'COMPLETED' ? '완료' : '실패'}</strong> · {review.processorKey} · {new Date(review.createdAt).toLocaleString("ko-KR")}
-                  <p>{review.status === "COMPLETED" ? "Stub 검토 완료: 실제 AI 검토 결과가 아닙니다." : review.status === "FAILED" ? "검토 작업을 완료하지 못했습니다." : "검토가 진행 중입니다."}</p>
-                  <p>{review.freshness.isCurrent ? "현재 추적 중인 검토 입력과 일치합니다." : `${review.freshness.episodeChanged ? "원고가 변경됨" : ""}${review.freshness.episodeChanged && review.freshness.canonChanged ? " · " : ""}${review.freshness.canonChanged ? "Canon이 변경됨" : ""}`}</p>
-                  {review.freshness.sceneMetadataComparison === 'CHANGED' && <p>장면 시점 설정이 변경됨</p>}
-                  {review.freshness.sceneMetadataComparison === 'LEGACY_NOT_TRACKED' && <p>이전 검토 기록은 장면 시점을 추적하지 않습니다.</p>}
-                  {review.freshness.sceneMetadataComparison === 'UNDETERMINED_EPISODE_CHANGED' && <p>원고가 바뀌어 장면 시점의 독립적인 변경 여부는 판정할 수 없습니다.</p>}
-                  {review.freshness.canonComparison === "UNDETERMINED_EPISODE_CHANGED" && <p>원고가 바뀌어 관련 Canon의 독립적인 변경 여부는 판정할 수 없습니다. 저장본 기준으로 다시 실행해 주세요.</p>}
-                  {review.findings.length > 0 && <ul>{review.findings.map((finding) => <li key={finding.id}>[{finding.category}] {finding.message}</li>)}</ul>}
-                </li>)}
-              </ul>}
+              {!reviewLoading && reviews.length > 0 && <ReviewResultViewer reviews={reviews} />}
             </section>}
           </form> : !contentLoading && !readBlocked && <p>회차를 선택하거나 새 회차를 작성하세요.</p>}
         </div>

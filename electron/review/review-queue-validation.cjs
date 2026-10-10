@@ -1,3 +1,4 @@
+const { textResult } = require('./testing/finding-fixtures.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -83,11 +84,11 @@ async function runValidation() {
     await waitFor(() => getDatabase().prepare('SELECT status FROM review_jobs WHERE id = ?').get(jobA.id).status === 'FAILED');
     await waitFor(() => getDatabase().prepare('SELECT status FROM review_jobs WHERE id = ?').get(jobC.id).status === 'RUNNING');
     assert.equal(getDatabase().prepare('SELECT status FROM review_runs WHERE id = (SELECT review_run_id FROM review_jobs WHERE id = ?)').get(jobA.id).status, 'FAILED');
-    held[1].step.resolve({ findings: [] });
+    held[1].step.resolve({ contractVersion: 'REVIEW_FINDINGS_V1', findings: [] });
     await waitFor(() => getDatabase().prepare('SELECT status FROM review_jobs WHERE id = ?').get(jobC.id).status === 'COMPLETED');
     await waitFor(() => getDatabase().prepare('SELECT status FROM review_jobs WHERE id = ?').get(resubmittedB.id).status === 'RUNNING');
     assert.equal(getDatabase().prepare('SELECT status FROM review_runs WHERE id = (SELECT review_run_id FROM review_jobs WHERE id = ?)').get(jobC.id).status, 'COMPLETED');
-    held[2].step.resolve({ findings: [{ category: 'OTHER', message: '검증 결과' }] });
+    held[2].step.resolve(textResult(held[2].context, '검증 결과'));
     await waitFor(() => getDatabase().prepare('SELECT status FROM review_jobs WHERE id = ?').get(resubmittedB.id).status === 'COMPLETED');
     assert.equal((await getReviewsByEpisode(storage, { workId: firstWork, episodeId: b.id }))[0].findings[0].message, '검증 결과');
     assert.throws(() => getDatabase().prepare('DELETE FROM review_runs WHERE id = ?').run(getDatabase().prepare('SELECT review_run_id FROM review_jobs WHERE id = ?').get(resubmittedB.id).review_run_id), /FOREIGN KEY constraint failed/);
@@ -98,7 +99,7 @@ async function runValidation() {
     await waitFor(() => getDatabase().prepare('SELECT status FROM review_jobs WHERE id = ?').get(blocker.id).status === 'RUNNING');
     const changed = await queue.submit({ workId: firstWork, episodeId: a.id });
     records.update(firstScope.world, world.id, inputFor(firstScope.world, '기억의 바다', { description: '변경된 설정' }));
-    held[3].step.resolve({ findings: [] });
+    held[3].step.resolve({ contractVersion: 'REVIEW_FINDINGS_V1', findings: [] });
     await waitFor(() => getDatabase().prepare('SELECT status FROM review_jobs WHERE id = ?').get(changed.id).status === 'RESUBMIT_REQUIRED');
     assert.equal(getDatabase().prepare('SELECT review_run_id FROM review_jobs WHERE id = ?').get(changed.id).review_run_id, null);
     assert.equal(episodes.updateEpisode(a.id, { title: '재제출 필요 후 수정' }).title, '재제출 필요 후 수정');
@@ -156,13 +157,13 @@ async function runValidation() {
     fs.writeFileSync(storage.resolveManagedPath(firstWork, externalRow.storageKey), '외부 변경', 'utf8');
     const missingRow = episodes.getEpisodeById(missingEpisode.id);
     fs.unlinkSync(storage.resolveManagedPath(firstWork, missingRow.storageKey));
-    controlled[0].step.resolve({ findings: [] });
+    controlled[0].step.resolve({ contractVersion: 'REVIEW_FINDINGS_V1', findings: [] });
     await waitFor(() => getDatabase().prepare('SELECT status FROM review_jobs WHERE id = ?').get(skillJob.id).status === 'RESUBMIT_REQUIRED');
     await waitFor(() => getDatabase().prepare('SELECT status FROM review_jobs WHERE id = ?').get(externalJob.id).status === 'RESUBMIT_REQUIRED');
     await waitFor(() => getDatabase().prepare('SELECT status FROM review_jobs WHERE id = ?').get(missingJob.id).status === 'FAILED');
     await waitFor(() => getDatabase().prepare('SELECT status FROM review_jobs WHERE id = ?').get(unrelatedJob.id).status === 'RUNNING');
     assert.equal(controlled.length, 2);
-    controlled[1].step.resolve({ findings: [] });
+    controlled[1].step.resolve({ contractVersion: 'REVIEW_FINDINGS_V1', findings: [] });
     await waitFor(() => getDatabase().prepare('SELECT status FROM review_jobs WHERE id = ?').get(unrelatedJob.id).status === 'COMPLETED');
     assert.equal(getDatabase().prepare('SELECT review_run_id FROM review_jobs WHERE id = ?').get(skillJob.id).review_run_id, null);
     assert.equal(getDatabase().prepare('SELECT review_run_id FROM review_jobs WHERE id = ?').get(externalJob.id).review_run_id, null);
@@ -172,7 +173,7 @@ async function runValidation() {
     const fixedContext = JSON.stringify(controlled[2].context);
     records.update(firstScope.skill, skill.id, inputFor(firstScope.skill, '해일', { required_attribute: water.id }));
     assert.equal(JSON.stringify(controlled[2].context), fixedContext);
-    controlled[2].step.resolve({ findings: [] });
+    controlled[2].step.resolve({ contractVersion: 'REVIEW_FINDINGS_V1', findings: [] });
     await waitFor(() => getDatabase().prepare('SELECT status FROM review_jobs WHERE id = ?').get(fixedJob.id).status === 'COMPLETED');
     assert.equal((await getReviewsByEpisode(storage, { workId: firstWork, episodeId: skillEpisode.id })).find(run => run.id === getDatabase().prepare('SELECT review_run_id FROM review_jobs WHERE id = ?').get(fixedJob.id).review_run_id).freshness.canonChanged, true);
     checkQueue.stop();

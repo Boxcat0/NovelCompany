@@ -1,6 +1,7 @@
 const { randomUUID } = require("node:crypto");
 const { getDatabase } = require("../database.cjs");
 const { RepositoryError } = require("./repository-error.cjs");
+const { insertValidatedFindings } = require('./review-finding-writer.cjs');
 
 /** Review ID와 외부 식별자가 빈 문자열 없이 전달됐는지 확인한다. */
 function requireId(value, code, message) {
@@ -19,6 +20,7 @@ function toRun(row) {
     episodeId: row.episode_id,
     status: row.status,
     processorKey: row.processor_key,
+    contractVersion: row.findings_contract_version,
     episodeContentHash: row.episode_content_hash,
     canonContextHash: row.canon_context_hash,
     contextMode: row.context_mode,
@@ -33,10 +35,13 @@ function toRun(row) {
   };
 }
 
-/** SQLite review_findings row를 public finding 형태로 변환한다. */
+/** Legacy에는 새 판단을 부여하지 않고 V1은 저장 당시 근거 snapshot으로 읽는다. */
 function toFinding(row) {
   return {
+    ...(row.contract_version ? JSON.parse(row.details_json) : {}),
+    contractVersion: row.contract_version,
     id: row.id,
+    reviewRunId: row.review_run_id,
     category: row.category,
     message: row.message,
     sortOrder: row.sort_order,
@@ -94,8 +99,8 @@ function createRun(input) {
   return getById(id);
 }
 
-/** RUNNING Run만 Finding insertion과 COMPLETED 전환을 하나의 transaction으로 완료한다. */
-function completeRun(reviewRunId, findings) {
+/** 검증된 결과 저장과 RUNNING Run의 완료를 한 transaction에서 확정한다. */
+function completeRun(reviewRunId, result) {
   const id = requireId(reviewRunId, "REVIEW_RUN_ID_REQUIRED", "검토 실행 ID를 입력해 주세요.");
   const database = getDatabase();
   database.exec("BEGIN IMMEDIATE");
@@ -103,8 +108,7 @@ function completeRun(reviewRunId, findings) {
     const running = database.prepare("SELECT id FROM review_runs WHERE id = ? AND status = 'RUNNING'").get(id);
     if (!running) throw new RepositoryError("REVIEW_COMPLETE_FAILED", "진행 중인 검토 작업을 완료할 수 없습니다.");
     const now = new Date().toISOString();
-    const insert = database.prepare("INSERT INTO review_findings (id, review_run_id, category, message, sort_order, created_at) VALUES (?, ?, ?, ?, ?, ?)");
-    findings.forEach((finding, sortOrder) => insert.run(randomUUID(), id, finding.category, finding.message, sortOrder, now));
+    insertValidatedFindings(database, id, result, now);
     database.prepare("UPDATE review_runs SET status = 'COMPLETED', completed_at = ?, error_code = NULL WHERE id = ? AND status = 'RUNNING'").run(now, id);
     database.exec("COMMIT");
   } catch (cause) {

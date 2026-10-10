@@ -23,7 +23,9 @@
     "test:skill-attribute": "node electron/database/skill-attribute-validation.cjs",
     "test:canon-alias": "node electron/database/canon-alias-validation.cjs",
     "test:scene-narration": "node electron/context/scene-narration-validation.cjs",
-    "test:review-queue": "node electron/review/review-queue-validation.cjs"
+    "test:review-queue": "node electron/review/review-queue-validation.cjs",
+    "test:review-findings": "node electron/review/review-findings-validation.cjs",
+    "test:rule-review": "node electron/review/rule-review-validation.cjs"
   },
   "build": {
     "appId": "com.novelcompany.app",
@@ -34,7 +36,9 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
-      "package.json"
+      "package.json",
+      "!electron/**/testing/**/*",
+      "!electron/**/*-validation.cjs"
     ],
     "win": {
       "target": "nsis"

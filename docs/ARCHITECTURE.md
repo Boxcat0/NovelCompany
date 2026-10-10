@@ -1,5 +1,27 @@
 # NovelCompany 아키텍처
 
+## Task030 — 등록 Canon 관계의 결정적 규칙 검토
+
+기존 제출 경로는 `WorksScreen → reviews.submit/start → Review Queue → ReviewJob → ReviewRun → Processor → V1 결과 검증 → 원자 완료`다. Main의 `validateProcessorSelection`은 STUB_V1/RULE_V1만 허용하며 생략하면 STUB_V1이다. Renderer는 명시적 선택만 전달한다. 제출 시 선택을 비동기 읽기 전에 고정하고 Job에 저장하며 Worker는 해당 키로 생성한 Processor를 실행한다. 테스트 Main factory 주입은 유지하지만 IPC에서 Mock/임의 Processor는 거부한다.
+
+`inspectCharacterSkillAttributes`는 현재 Relevant Canon의 식별 가능한 Character에 등록된 skills/attributes와 Skill.required_attribute를 Record ID로 비교한다. 전체 Work로 검사 범위를 넓히지 않는다. `canon-record-repository.getById → buildEpisodeWorkContext → buildReviewContext`가 같은 Work의 전체 참조 목록을 축약 없이 전달한다. 순수 builder의 `canonReferenceCoverage`는 선택 Character의 전체 attributes/skills ID 목록을 확인하는 파생 정보다. Processor는 이 확인 정보와 실제 목록이 정확히 일치하고 관련 Record가 선택 범위 안에서 해석될 때만 비교한다. 필드·목록·Record가 누락되거나 필요 속성이 미설정이면 내부 UNVERIFIABLE 진단만 남긴다.
+
+`CHARACTER_SKILL_ATTRIBUTE_MISMATCH_V1`/규칙 V1은 보유 속성 목록에 필요 속성 ID가 없을 때 CANON/WARNING/DETERMINISTIC 및 CANON_RECORD Anchor를 만든다. 규칙·버전·범위와 Character/Skill/필요 속성/보유 속성 전체의 이름·ID를 evidence에 보존한다. 정렬과 관계 키 중복 제거로 같은 입력의 결과가 일정하다. 이름으로만 선택한 Character는 NAME_CANDIDATE 역할을 유지한다. 실제 Skill 사용자·화자·POV·소속으로 대상을 추론하거나 AMBIGUOUS 후보를 확정하지 않는다. 등록 관계 확인을 작품 설정 오류 판결로 표시하지 않는다.
+
+Task029의 전체 결과 검증·snapshot writer·Findings/Run/Job transaction을 재사용한다. Run.processor_key와 정적 RULE_V1 정의 및 evidence로 규칙 버전/범위를 추적한다. UI는 저장된 근거와 제한된 검사 범위를 표시하고 0건도 전체 작품의 무오류를 보장하지 않는다고 안내한다. 기존 FIFO·회차 잠금·dirty 차단·지연 응답 보호는 유지한다. coverage는 입력 hash에 추가하지 않으며 Canon V1/V2/V3, Scene, Alias fingerprint 함수와 Legacy 비교 규칙을 변경하지 않는다.
+
+## Task029 — 검증된 Review Findings
+
+Processor의 `review(context)`는 `{ contractVersion: 'REVIEW_FINDINGS_V1', findings: drafts }`를 반환한다. `executeReviewProcessor`는 실행 Context의 분리 복사본만 전달하고 원본 Context로 전체 결과를 검증한다. Processor는 DB·TXT·Canon·Job을 쓰지 않는다. ReviewContext 분석 경고 및 Ownership Checks를 Finding으로 자동 변환하지 않는다.
+
+`validateReviewProcessorResult`는 형식·한도·Anchor·Canon 역할을 검사하고 최소 근거 snapshot을 동결한다. WeakMap에 검증된 결과와 Work/Episode/설정 Processor를 연결해 Repository가 비검증 객체 및 다른 실행 범위의 결과를 거부한다. Processor의 출력에 ID/Run ID/정렬/출처 주입은 허용하지 않는다. ID와 순서는 Repository, provenance는 신뢰된 실행 설정에서 결정한다.
+
+Queue의 Processor 대기는 transaction 밖이다. 검증 성공 후 `review-job-repository.complete`의 BEGIN IMMEDIATE 안에서 `insertValidatedFindings` → Run COMPLETED → Job COMPLETED → COMMIT을 수행한다. 실패하면 전부 ROLLBACK하고 별도 실패 transaction으로 Run/Job을 함께 FAILED 처리한다. 종료 저장도 불가능하면 Worker가 멈추고 잠금을 유지하며 다음 앱 시작의 REVIEW_INTERRUPTED 복구를 사용한다.
+
+Task029 당시 운영 Main/IPC는 STUB_V1만 사용했고 Task030부터 RULE_V1을 명시적으로 선택할 수 있다. MOCK_V1은 `electron/review/testing`의 고정 가상 입력 전용이며 테스트 Main의 factory 주입에서만 사용한다. 패키징에서 testing 폴더와 validation 파일을 제외한다. 향후 AI Adapter도 같은 Result를 반환하고 동일 검증을 거쳐야 한다. 실제 AI 호출·자동 수정은 구현하지 않는다.
+
+WorksScreen의 기존 응답 sequence 보호 아래 `ReviewResultViewer`가 Run별 상세를 React 텍스트로 표시한다. 별도 detail fetch 없이 이미 받은 Run의 저장된 근거를 사용한다. 원고 또는 Canon을 읽을 수 없는 경우 현재성은 UNAVAILABLE로 구분하고 이력은 조회한다. Context/Canon/Scene/name fingerprint 함수는 변경하지 않는다.
+
 ## Task028 — Character 별칭과 명칭 후보
 
 Generic Character를 먼저 저장하고 `canon.aliases.list/create/update/delete`로 0개 이상의 별칭을 관리한다. Work → 현재 CanonSpace → character Record 범위를 Repository가 매번 검증한다. ConceptScreen의 별칭 영역은 DynamicCanonForm과 독립되어 Character draft를 보존한다. 쓰기 중 이동은 막고, 조회는 Character/Work별 component key와 요청 sequence로 이전 응답을 폐기한다. 저장된 소속은 기존 organization 참조 선택지에서 읽는다.

@@ -58,7 +58,7 @@ async function runValidation() {
       assert.equal(tableNames.has(tableName), true, "Missing table: " + tableName);
     }
     assert.equal(database.prepare("PRAGMA foreign_keys").get().foreign_keys, 1);
-    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 12);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 14);
 
     insertWorkAndEpisode(database, "work-a");
     insertWorkAndEpisode(database, "work-b");
@@ -215,7 +215,7 @@ function validateTask017Migration(temporaryRoot) {
   const migrated = initializeDatabase(databasePath);
   assert.deepEqual(migrated.prepare("SELECT id, canon_set_id, key, value_type FROM canon_fields WHERE key != 'required_attribute' ORDER BY id").all(), beforeFields);
   assert.deepEqual(records.getById(scopes.world, saved.id), saved);
-  assert.equal(migrated.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 12);
+  assert.equal(migrated.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 14);
   const { CANON_SETS } = require("./setup/setup-initial-novel-canon.cjs");
   for (const set of CANON_SETS) {
     for (const field of set.fields) assert.equal(migrated.prepare("SELECT required FROM canon_fields WHERE canon_set_id = ? AND key = ?").get(scopes[set.key].setId, field[0]).required, Number(field[4]));
@@ -244,7 +244,7 @@ function validateTask024Migration(temporaryRoot) {
   connection.exec("DROP TABLE canon_record_aliases; DROP TRIGGER invalidate_deleted_scene_narrator; DROP TRIGGER delete_episode_scene_narration; DROP TABLE scene_narration_metadata; DROP TABLE review_jobs; DROP TABLE review_findings; DROP TABLE review_runs; DELETE FROM schema_migrations WHERE version >= 6");
   closeDatabase();
   const migrated = initializeDatabase(databasePath);
-  assert.equal(migrated.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 12);
+  assert.equal(migrated.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 14);
   assert.equal(migrated.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'review_runs'").get().count, 1);
   assert.equal(migrated.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'review_findings'").get().count, 1);
   assert.equal(migrated.prepare("SELECT id FROM episodes WHERE id = ?").get("review-migration-work-episode").id, "review-migration-work-episode");
@@ -262,10 +262,10 @@ function validateTask026Migration(temporaryRoot) {
   const databasePath = path.join(temporaryRoot, 'migration-task026.db');
   const connection = initializeDatabase(databasePath);
   insertWorkAndEpisode(connection, 'queue-migration-work');
-  connection.exec('DROP TABLE canon_record_aliases; DROP TRIGGER invalidate_deleted_scene_narrator; DROP TRIGGER delete_episode_scene_narration; DROP TABLE scene_narration_metadata; ALTER TABLE review_runs DROP COLUMN name_resolution_version; ALTER TABLE review_runs DROP COLUMN scene_metadata_hash; ALTER TABLE review_runs DROP COLUMN scene_metadata_version; DROP TABLE review_jobs; DELETE FROM schema_migrations WHERE version >= 10');
+  connection.exec('DROP TABLE canon_record_aliases; DROP TRIGGER invalidate_deleted_scene_narrator; DROP TRIGGER delete_episode_scene_narration; DROP TABLE scene_narration_metadata; ALTER TABLE review_runs DROP COLUMN findings_contract_version; ALTER TABLE review_findings DROP COLUMN contract_version; ALTER TABLE review_findings DROP COLUMN details_json; ALTER TABLE review_runs DROP COLUMN name_resolution_version; ALTER TABLE review_runs DROP COLUMN scene_metadata_hash; ALTER TABLE review_runs DROP COLUMN scene_metadata_version; DROP TABLE review_jobs; DELETE FROM schema_migrations WHERE version >= 10');
   closeDatabase();
   const migrated = initializeDatabase(databasePath);
-  assert.equal(migrated.prepare('SELECT COUNT(*) n FROM schema_migrations').get().n, 12);
+  assert.equal(migrated.prepare('SELECT COUNT(*) n FROM schema_migrations').get().n, 14);
   assert.equal(migrated.prepare('SELECT id FROM episodes WHERE id = ?').get('queue-migration-work-episode').id, 'queue-migration-work-episode');
   assert.deepEqual(migrated.prepare('PRAGMA foreign_key_check').all(), []);
   const backupDirectory = path.join(temporaryRoot, 'backups');

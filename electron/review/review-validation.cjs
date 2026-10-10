@@ -1,3 +1,4 @@
+const { completeLegacyRun, textResult } = require('./testing/finding-fixtures.cjs');
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -61,7 +62,7 @@ async function runValidation() {
 
     const fullHash = buildCanonContextHash((await buildEpisodeWorkContext(storage, { workId, episodeId: episode.id })).canon);
     const synthetic = repository.createRun({ workId, episodeId: episode.id, processorKey: "TEST", episodeContentHash: first.source.episodeContentHash, canonContextHash: fullHash });
-    const withFinding = repository.completeRun(synthetic.id, [{ category: "OTHER", message: "Synthetic finding" }]);
+    const withFinding = completeLegacyRun(synthetic.id, [{ category: "OTHER", message: "Synthetic finding" }]);
     assert.equal(withFinding.findings[0].message, "Synthetic finding");
     assert.equal((await getReviewsByEpisode(storage, { workId, episodeId: episode.id })).find(item => item.id === synthetic.id).freshness.isCurrent, true);
     records.create(scope.world, inputFor(scope.world, '무관한 세계'));
@@ -81,7 +82,7 @@ async function runValidation() {
 
     getDatabase().exec("CREATE TEMP TRIGGER review_complete_failure BEFORE INSERT ON review_findings BEGIN SELECT RAISE(FAIL, 'forced completion failure'); END");
     try {
-      await expectFailure(() => startEpisodeReview(storage, { workId, episodeId: episode.id }, { processorKey: "FINDING", async review() { return { findings: [{ category: "OTHER", message: "must rollback" }] }; } }), "REVIEW_FAILED");
+      await expectFailure(() => startEpisodeReview(storage, { workId, episodeId: episode.id }, { processorKey: "FINDING", async review(context) { return textResult(context, "must rollback"); } }), "REVIEW_FAILED");
       const incomplete = repository.getByEpisode({ workId, episodeId: episode.id }).find((item) => item.processorKey === "FINDING");
       assert.equal(incomplete.status, "FAILED");
       assert.deepEqual(incomplete.findings, []);
