@@ -102,6 +102,11 @@ export type WorkContext = {
 };
 
 export type ReviewFindingCategory = "TEXT" | "NARRATION" | "NAME_RESOLUTION" | "CONTINUITY" | "TYPO" | "SPACING" | "GRAMMAR" | "CANON" | "OTHER";
+export type AuthorDecisionStatus = 'UNREVIEWED' | 'NEEDS_FIX' | 'REJECTED' | 'DEFERRED' | 'RESOLVED';
+export type ReviewDecisionScope = { workId: string; episodeId: string; reviewRunId: string };
+export type FindingDecisionScope = ReviewDecisionScope & { findingId: string };
+export type FindingDecision = { findingId: string; eventId: string | null; decisionStatus: AuthorDecisionStatus; note: string; revision: number; createdAt: string | null };
+export type AppendFindingDecisionInput = FindingDecisionScope & { decisionStatus: Exclude<AuthorDecisionStatus, 'UNREVIEWED'>; note: string; expectedRevision: number };
 export type SourceRange = { start: number; end: number };
 export type NarrationMode = 'FIRST_PERSON_CHARACTER' | 'EXTERNAL_THIRD_PERSON' | 'UNKNOWN';
 export type SceneNarration = { mode: NarrationMode; source: 'AUTHOR_SET' | 'UNSET'; narratorCharacter: WorkContextReference | null; status: 'VALID' | 'NARRATOR_DELETED' };
@@ -181,7 +186,7 @@ export type UpdateEpisodeInput = CreateEpisodeInput;
 export interface NovelCompanyApi {
   backup: {
     export(): Promise<IpcResult<BackupSummary | null>>;
-    preview(): Promise<IpcResult<(BackupSummary & { token: string }) | null>>;
+    preview(mode?: 'overwrite' | 'update'): Promise<IpcResult<(BackupSummary & { token: string }) | null>>;
     import(token: string): Promise<IpcResult<(BackupSummary & { automaticBackup: string; restartRequired: boolean }) | null>>;
     cancelPreview(): Promise<IpcResult<null>>;
     status(): Promise<IpcResult<{ busy: boolean; phase: string; workCount?: number; episodeCount?: number; databaseSchemaVersion?: number }>>;
@@ -250,6 +255,11 @@ export interface NovelCompanyApi {
     }): Promise<IpcResult<WorkContext>>;
   };
   reviews: {
+    decisions: {
+      listForRun(scope: ReviewDecisionScope): Promise<IpcResult<FindingDecision[]>>;
+      history(scope: FindingDecisionScope): Promise<IpcResult<FindingDecision[]>>;
+      append(input: AppendFindingDecisionInput): Promise<IpcResult<FindingDecision>>;
+    };
     start(input: ReviewSubmissionInput): Promise<IpcResult<ReviewJob>>;
     submit(input: ReviewSubmissionInput): Promise<IpcResult<ReviewJob>>;
     getQueue(): Promise<IpcResult<ReviewQueue>>;
@@ -260,7 +270,8 @@ export interface NovelCompanyApi {
   };
 }
 
-export type BackupSummary = { createdAt: string; applicationVersion?: string; databaseSchemaVersion: number; workCount: number; episodeCount: number };
+export type BackupConflict = { key: string; type: string; title: string; reason: string; currentHash?: string | null; incomingHash?: string | null; currentUpdatedAt?: string | null; incomingUpdatedAt?: string | null; currentValue?: string | null; incomingValue?: string | null };
+export type BackupSummary = { createdAt: string; applicationVersion?: string; sourceSchemaVersion?: number; databaseSchemaVersion: number; workCount: number; episodeCount: number; mode?: 'overwrite' | 'update'; automaticCount?: number; conflictCount?: number; unchangedCount?: number; commonBaseline?: boolean; conflicts?: BackupConflict[] };
 
 declare global {
   interface Window {

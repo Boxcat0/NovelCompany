@@ -43,7 +43,8 @@ function readMigrationFiles(migrationsDirectory) {
   return migrations.sort((left, right) => left.version - right.version);
 }
 
-function runMigrations(database, migrationsDirectory) {
+// 지정한 버전까지만 정식 Migration을 적용하여 과거 버전의 기준 Schema도 재현한다.
+function runMigrations(database, migrationsDirectory, throughVersion = Infinity) {
   ensureMigrationTable(database);
 
   const appliedMigrations = new Map(
@@ -54,6 +55,7 @@ function runMigrations(database, migrationsDirectory) {
   );
 
   for (const migration of readMigrationFiles(migrationsDirectory)) {
+    if (migration.version > throughVersion) continue;
     const appliedName = appliedMigrations.get(migration.version);
 
     if (appliedName) {
@@ -86,5 +88,4 @@ function runMigrations(database, migrationsDirectory) {
   }
 }
 
-module.exports = { runMigrations };
-
+module.exports = { runMigrations, readMigrationFiles };

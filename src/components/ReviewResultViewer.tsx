@@ -1,13 +1,55 @@
-import type { ReviewRun } from '../types/electron-api';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { AuthorDecisionStatus, FindingDecision, ReviewRun } from '../types/electron-api';
+import { decisionLabels, FindingDecisionEditor } from './FindingDecisionEditor';
 
 const categories: Record<string, string> = { TEXT: '문장', TYPO: '오탈자', SPACING: '띄어쓰기', GRAMMAR: '문법', CANON: 'Canon', NARRATION: '서술 시점', NAME_RESOLUTION: '이름 해석', CONTINUITY: '연속성', OTHER: '기타' };
 const severity = { INFO: '정보', WARNING: '주의', ERROR: '중요 확인' };
 const assessment = { DETERMINISTIC: '명시 입력·규칙 근거', INFERENCE_CANDIDATE: '추론 후보', UNDETERMINED: '판정 미확정' };
 const roles = { CONTEXT_RECORD: 'Context 연결', NAME_CANDIDATE: '등록 명칭 후보', AMBIGUOUS_CANDIDATE: '모호한 명칭 후보' };
 
-/** 저장 당시 근거를 안전한 텍스트로 표시하고 Processor별 실제 검사 범위와 빈 결과를 설명한다. */
-export function ReviewResultViewer({ reviews }: { reviews: ReviewRun[] }) {
-  return <ul className="review-history">{reviews.map(review => <li key={review.id} data-review-run-id={review.id}>
+/** 원본 근거와 작가 판단을 분리 표시하고 Run별 일괄 조회·필터·미저장 판단 이동 보호를 제공한다. */
+export function ReviewResultViewer({ reviews, onStateChange }: { reviews: ReviewRun[]; onStateChange?: (dirty: boolean, busy: boolean) => void }) {
+  const [decisions, setDecisions] = useState<Record<string, FindingDecision>>({});
+  const [filter, setFilter] = useState<AuthorDecisionStatus | 'ALL'>('ALL');
+  const [selected, setSelected] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const editorState = useRef({ dirty: false, busy: false });
+  const runKey = reviews.map(run => run.id + ':' + run.findings.map(item => item.id).join(',')).join('|');
+  /** 판단 상태를 부모의 회차·화면 이동 보호에 전달한다. */
+  const handleState = useCallback((dirty: boolean, busy: boolean) => { editorState.current = { dirty, busy }; onStateChange?.(dirty, busy); }, [onStateChange]);
+  /** 저장 직후 요약을 갱신하고 늦게 도착한 이전 revision은 적용하지 않는다. */
+  const handleSaved = useCallback((decision: FindingDecision) => setDecisions(previous => (previous[decision.findingId]?.revision ?? -1) > decision.revision ? previous : { ...previous, [decision.findingId]: decision }), []);
+  useEffect(() => {
+    let cancelled = false;
+    /** Finding별 요청 없이 각 Run의 최신 판단을 한 번씩 읽는다. */
+    async function load() {
+      setError('');
+      try {
+        const results = await Promise.all(reviews.filter(run => run.findings.length).map(run => window.novelCompany.reviews.decisions.listForRun({ workId: run.workId, episodeId: run.episodeId, reviewRunId: run.id })));
+        if (cancelled) return;
+        for (const result of results) { if (result.ok) result.data.forEach(handleSaved); else setError(result.error.message); }
+      } catch { if (!cancelled) setError('작가 판단 목록을 불러오지 못했습니다. 검토 결과를 다시 열어 주세요.'); }
+    }
+    void load(); return () => { cancelled = true; };
+  }, [runKey, handleSaved]);
+  /** 다른 Finding 또는 필터로 이동하기 전에 미저장 판단을 확인한다. */
+  function canLeave() { return !editorState.current.busy && (!editorState.current.dirty || window.confirm('저장하지 않은 작가 판단이 있습니다. 버리고 계속하시겠습니까?')); }
+  /** 한 번에 한 Finding만 편집하여 판단 메모의 소속을 명확히 유지한다. */
+  function selectFinding(id: string) { if (selected !== id && canLeave()) { handleState(false, false); setSelected(id); } }
+  /** 필터로 숨겨지는 편집 입력은 사용자 확인 뒤에만 닫는다. */
+  function changeFilter(value: AuthorDecisionStatus | 'ALL') { if (canLeave()) { handleState(false, false); setSelected(null); setFilter(value); } }
+  const selectedRun = reviews.find(run => run.findings.some(item => item.id === selected));
+  return <>
+    <label htmlFor="finding-decision-filter">작가 판단 상태 필터</label>
+    <select id="finding-decision-filter" value={filter} onChange={event => changeFilter(event.target.value as AuthorDecisionStatus | 'ALL')}>
+      <option value="ALL">전체</option>{Object.entries(decisionLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+    </select>
+    {error && <p role="alert">{error}</p>}
+    {selectedRun && selected && <>
+      <p>선택한 발견 사항: {selectedRun.findings.find(item => item.id === selected)?.message}</p>
+      <FindingDecisionEditor key={selected} scope={{ workId: selectedRun.workId, episodeId: selectedRun.episodeId, reviewRunId: selectedRun.id, findingId: selected }} isCurrent={selectedRun.freshness.isCurrent} onStateChange={handleState} onSaved={handleSaved} />
+    </>}
+    <ul className="review-history">{reviews.map(review => <li key={review.id} data-review-run-id={review.id}>
     <strong>{review.status === 'RUNNING' ? '검토 중' : review.status === 'COMPLETED' ? '완료' : '실패'}</strong> · {review.processorKey} · {new Date(review.createdAt).toLocaleString('ko-KR')}
     <p>결과 계약: {review.contractVersion ?? (review.status === 'COMPLETED' ? 'Legacy · 근거 계약 도입 이전' : '결과 미저장')} · Finding {review.findings.length}건</p>
     {review.processorKey === 'MOCK_V1' && <p>테스트용 가상 검토 결과입니다. 실제 원고의 오류를 판정한 결과가 아닙니다.</p>}
@@ -26,7 +68,7 @@ export function ReviewResultViewer({ reviews }: { reviews: ReviewRun[] }) {
     {review.freshness.canonComparison === 'UNDETERMINED_EPISODE_CHANGED' && <p>원고가 바뀌어 관련 Canon의 독립적인 변경 여부는 판정할 수 없습니다. 저장본 기준으로 다시 실행해 주세요.</p>}
     {review.findings.length > 0 && <details><summary>검토 결과 상세 · {review.findings.length}건</summary>
       <p>심각도와 판단 확실성은 별개입니다. 명시 근거가 있어도 작품 설정 오류의 확정을 뜻하지 않습니다.</p>
-      <ol>{review.findings.map(finding => <li key={finding.id} data-finding-id={finding.id}>
+      <ol>{review.findings.filter(finding => filter === 'ALL' || decisions[finding.id]?.decisionStatus === filter).map(finding => <li key={finding.id} data-finding-id={finding.id}>
         <strong>[{categories[finding.category] ?? finding.category}] {finding.message}</strong>
         {finding.contractVersion === null ? <p>Legacy 결과: 당시 근거·심각도·판단 확실성이 기록되지 않았습니다.</p> : <>
           <p>{severity[finding.severity]} ({finding.severity}) · {assessment[finding.assessment]} ({finding.assessment})</p>
@@ -42,7 +84,9 @@ export function ReviewResultViewer({ reviews }: { reviews: ReviewRun[] }) {
           </li>)}</ul>
           <p>출처: {finding.provenance.processorKey} · {finding.contractVersion}</p>
         </>}
+        <p>작가 판단: {decisions[finding.id] ? decisionLabels[decisions[finding.id].decisionStatus] : '조회 중'}</p>
+        <button type="button" onClick={() => selectFinding(finding.id)}>작가 판단 편집</button>
       </li>)}</ol>
     </details>}
-  </li>)}</ul>;
+  </li>)}</ul></>;
 }

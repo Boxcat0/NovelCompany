@@ -1,4 +1,7 @@
 const IPC_CHANNELS = Object.freeze({
+  REVIEW_DECISIONS_LIST: 'reviews:decisions:list',
+  REVIEW_DECISIONS_HISTORY: 'reviews:decisions:history',
+  REVIEW_DECISIONS_APPEND: 'reviews:decisions:append',
   CANON_ALIAS_LIST: 'canon:aliases:list',
   CANON_ALIAS_CREATE: 'canon:aliases:create',
   CANON_ALIAS_UPDATE: 'canon:aliases:update',

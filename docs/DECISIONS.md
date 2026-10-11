@@ -1,5 +1,15 @@
 # NovelCompany 아키텍처 결정 기록
 
+## Task031 — 검토 엔진의 발견과 작가 판단은 별개다
+
+- ReviewFinding 원본을 수정하지 않고 `review_finding_decision_events`에 판단을 추가한다. UNREVIEWED는 이력 없는 상태이며 저장 이벤트는 NEEDS_FIX/REJECTED/DEFERRED/RESOLVED만 허용한다. RESOLVED는 작가 선언이지 프로그램의 해결 인증이 아니다.
+- 최신 판단은 시각이 아닌 Finding별 최대 revision으로 결정한다. 트랜잭션과 expectedRevision으로 오래된 저장을 거부한다. 동일 상태/메모의 반복 저장은 새 이벤트를 만들지 않는다. 기존 이벤트 UPDATE/직접 DELETE는 금지하되 부모 Finding의 정상 삭제 lifecycle에는 cascade를 허용한다.
+- Work/Episode/Run/Finding 소속은 Main Repository에서 재검증한다. UI는 Run별 요약 조회로 N+1 IPC를 피하고, 미저장 입력과 지연 응답을 보호한다. 검토 결과 새로고침 중에도 판단 초안을 유지한다.
+- 판단 저장은 ReviewJob, fingerprint, TXT, Canon을 변경하지 않는다. 기존 검토가 QUEUED/RUNNING인 동안 과거 Finding에 판단을 기록할 수 있다. Freshness STALE/UNAVAILABLE 및 Legacy 여부와 판단 상태는 독립이다. 재검토 시 유사 Finding에도 판단을 자동 승계하지 않는다.
+- Migration 015 전 자동 백업과 기존 001~014 불변을 지킨다. 전체 ZIP 복원은 판단 이력까지 복원하고, 014 ZIP은 격리 정식 Migration으로 지원한다. 미래/변조 Schema 거부 정책은 유지한다.
+- HF03-B 업데이트는 로컬 판단 이력을 보존하고 원격 판단 이력은 병합하지 않는다. 양방향 판단 병합에는 별도 기준본/충돌 설계가 필요하다. 실제 PC 간 ZIP 가져오기 결함은 계속 보류하며 이번 작업 범위가 아니다.
+- Task032는 NEEDS_FIX를 향후 수정 후보로 조회할 수 있다. 이번에는 Editor Job/Queue, AI 호출, 자동 수정/해결/기각, Diff나 승인 실행을 구현하지 않는다.
+
 ## Task030-HF02 — 전체 snapshot을 검증한 후 승인된 수동 교체만 수행한다
 
 - 백업 단위는 Work 하나가 아닌 전체 SQLite + 등록 원고이며 ZIP 한 개로 다른 Windows 데이터 root에 이전한다. TXT를 변환하거나 Canon을 자동 수정하지 않는다. 앱 관리 자산 저장소가 없는 현재 버전에서 임의 폴더 수집을 추가하지 않는다.
@@ -314,3 +324,9 @@ Contract/Relationship은 Character 2명 이후, Authority/Servant는 1명 이후
 현재 PC에서 실제 CanonSpace가 비어 있음을 확인했고, 사용자가 기존 Task016 정의의 명시적 복구를 요청했다. 이에 원본 `setup-initial-novel-canon.cjs`의 CANON_SETS를 공통 `initial-canon-definition.cjs`로 추출했다. 원본 Field를 추측하거나 추가하지 않고 기존 정의 설치 후 합의된 required만 정제한다. 복구 도구는 현재 작품의 명시적 CanonSpace ID, 완전 빈 상태, 백업, transaction, 설치 검증을 요구한다. 부분 정의는 오류이며 Record를 생성하지 않는다.
 
 Canon 시작은 계속 공간만 생성한다. Definition Bootstrap은 별도 관리 명령이고 앱 자동 동작이 아니다. 다른 작품 자동 설치, Preset/Template Registry, Schema CRUD, Canon Copy 및 AI Manager/Review/Editing은 후속 범위다.
+## Task030-HF03 — 두 가져오기 방식은 독립적이며 모호한 Merge를 금지한다
+
+- 전체 덮어쓰기는 현재 PC의 SQL Schema와 비교하지 않는다. ZIP DB의 공식 Migration 접두열·버전별 필수 SQL 객체·SQLite 무결성·TXT를 확인하고 공식 구형 버전은 격리 복사본에서만 Migration한다. 미래/변조 Schema는 거부한다.
+- 업데이트 V1은 동일 Work/CanonSpace ID 및 동일 Generic Canon Definition ID/내용에서만 실행한다. 공통 기준본은 최초 수동 내보내기의 로컬 sidecar와 ZIP Manifest에 기록된 ID·논리 항목 해시다. 구형 ZIP에는 없을 수 있으며 이때 방향 불명 변경을 자동 적용하지 않는다.
+- 기준본 대비 한쪽만 바뀐 Work/Record/Episode 단위만 자동 병합한다. 양쪽 변경, 삭제/수정, 기준본 부재, 동명 다른 ID, 참조 위반은 전체 중단한다. 타임스탬프는 참고용이다. UI의 충돌 수동 선택은 V1에서 제공하지 않는다.
+- 로컬 ReviewRun/Finding은 보존하고 원격 Job 상태는 가져오지 않는다. 임시 병합본을 검증한 뒤 기존 전체 교체 Journal 경로를 재사용한다. 자동 백업과 원본 기준본을 함께 보호한다.

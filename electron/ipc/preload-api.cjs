@@ -93,6 +93,14 @@ function createNovelCompanyApi(ipcRenderer) {
         ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_GET_EPISODE_WORK_CONTEXT, input),
     },
     reviews: {
+      decisions: {
+        /** Run 단위 판단 조회를 검증용 bridge에도 동일하게 연결한다. */
+        listForRun: (scope) => ipcRenderer.invoke(IPC_CHANNELS.REVIEW_DECISIONS_LIST, scope),
+        /** 선택 Finding의 판단 이력 조회를 전달한다. */
+        history: (scope) => ipcRenderer.invoke(IPC_CHANNELS.REVIEW_DECISIONS_HISTORY, scope),
+        /** 기대 revision과 작가 판단의 추가 요청을 전달한다. */
+        append: (input) => ipcRenderer.invoke(IPC_CHANNELS.REVIEW_DECISIONS_APPEND, input),
+      },
       /** 이전 시작 API도 제출 경로로 위임해 FIFO를 우회하지 못하게 한다. */
       start: (input) => ipcRenderer.invoke(IPC_CHANNELS.REVIEW_SUBMIT, input),
       /** 저장된 회차와 선택 검토 방식을 기존 대기열에 접수한다. */

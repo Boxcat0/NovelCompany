@@ -65,7 +65,7 @@ async function validateAliasIpc(ipcMain, runtimeApi) {
 /** 011 DB에 012를 백업 후 적용하며 기존 Job/Run source와 queue 순번을 보존한다. */
 function validateMigration(root) {
   const file = path.join(root, 'novelcompany.db'); const db = getDatabase();
-  db.exec('DROP TRIGGER review_job_processor_immutable; ALTER TABLE review_jobs DROP COLUMN processor_key; DROP TABLE canon_record_aliases; ALTER TABLE review_runs DROP COLUMN findings_contract_version; ALTER TABLE review_findings DROP COLUMN contract_version; ALTER TABLE review_findings DROP COLUMN details_json; ALTER TABLE review_jobs DROP COLUMN name_resolution_version; ALTER TABLE review_runs DROP COLUMN name_resolution_version; DELETE FROM schema_migrations WHERE version >= 12');
+  db.exec('DROP TABLE review_finding_decision_events; DROP TRIGGER review_job_processor_immutable; ALTER TABLE review_jobs DROP COLUMN processor_key; DROP TABLE canon_record_aliases; ALTER TABLE review_runs DROP COLUMN findings_contract_version; ALTER TABLE review_findings DROP COLUMN contract_version; ALTER TABLE review_findings DROP COLUMN details_json; ALTER TABLE review_jobs DROP COLUMN name_resolution_version; ALTER TABLE review_runs DROP COLUMN name_resolution_version; DELETE FROM schema_migrations WHERE version >= 12');
   const before = ['works', 'episodes', 'canon_records', 'review_runs', 'review_jobs'].map(table => db.prepare('SELECT * FROM ' + table + ' ORDER BY rowid').all());
   const sequence = db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'review_jobs'").get()?.seq;
   closeDatabase();

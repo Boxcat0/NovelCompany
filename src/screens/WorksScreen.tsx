@@ -2,7 +2,7 @@ import { ReviewResultViewer } from '../components/ReviewResultViewer';
 import { SceneNarrationEditor } from '../components/SceneNarrationEditor';
 import { ReviewContextPreview } from '../components/ReviewContextPreview';
 import type { ReviewContext } from '../types/electron-api';
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { EpisodeStatus } from "../types/episode";
 import type {
   IpcResult,
@@ -35,7 +35,7 @@ function episodeDraft(episode: StoredEpisode, content: string): EpisodeDraft {
   return { episodeNumber: String(episode.episodeNumber), title: episode.title, status: episode.status, content };
 }
 
-/** 기존 작품/회차 탐색을 유지하면서 명시적 metadata/TXT 저장과 삭제를 제공한다. */
+/** 작품/회차 편집과 검토 판단을 표시하고 모든 미저장 입력의 이동을 보호한다. */
 function WorksScreen({ onNavigationState }: { onNavigationState?: (dirty: boolean, busy: boolean) => void }) {
   const [works, setWorks] = useState<StoredWork[]>([]);
   const [selectedWork, setSelectedWork] = useState<StoredWork | null>(null);
@@ -44,6 +44,10 @@ function WorksScreen({ onNavigationState }: { onNavigationState?: (dirty: boolea
   const [draft, setDraft] = useState<EpisodeDraft | null>(null);
   const [narrationDirty, setNarrationDirty] = useState(false);
   const [narrationSaving, setNarrationSaving] = useState(false);
+  const [decisionDirty, setDecisionDirty] = useState(false);
+  const [decisionBusy, setDecisionBusy] = useState(false);
+  /** 작가 판단 편집 상태를 기존 화면 이동·종료 보호에 포함한다. */
+  const handleDecisionState = useCallback((dirty: boolean, busy: boolean) => { setDecisionDirty(dirty); setDecisionBusy(busy); }, []);
   /** 장면 편집 상태를 이동 보호와 제출 조건에 반영한다. */
   const handleNarrationState = useCallback((dirty: boolean, busy: boolean) => { setNarrationDirty(dirty); setNarrationSaving(busy); }, []);
   const [baseline, setBaseline] = useState("");
@@ -76,7 +80,7 @@ function WorksScreen({ onNavigationState }: { onNavigationState?: (dirty: boolea
   const reviewQueueRequestIdRef = useRef(0);
   const mounted = useRef(true);
   const dirty = draft !== null && (contentMissing || JSON.stringify(draft) !== baseline);
-  const busy = narrationSaving || worksLoading || episodesLoading || contentLoading || saving || contextLoading || reviewStarting;
+  const busy = decisionBusy || narrationSaving || worksLoading || episodesLoading || contentLoading || saving || contextLoading || reviewStarting;
   const reviewLocked = reviewJob?.status === 'QUEUED' || reviewJob?.status === 'RUNNING';
   const queueActive = Boolean(reviewQueue?.running.length || reviewQueue?.queued.length);
   const queuePosition = reviewJob && reviewQueue ? reviewQueue.queued.findIndex(item => item.id === reviewJob.id) : -1;
@@ -98,21 +102,22 @@ function WorksScreen({ onNavigationState }: { onNavigationState?: (dirty: boolea
     const timer = window.setInterval(() => { void loadQueue(); if (selectedEpisode) void loadReviewJob(selectedWork.id, selectedEpisode.id); }, queueActive ? 2000 : 5000);
     return () => window.clearInterval(timer);
   }, [selectedWork?.id, selectedEpisode?.id, queueActive]);
-  useEffect(() => { onNavigationState?.(dirty || narrationDirty, busy); }, [dirty, narrationDirty, busy, onNavigationState]);
+  useLayoutEffect(() => { onNavigationState?.(dirty || narrationDirty || decisionDirty, busy); }, [dirty, narrationDirty, decisionDirty, busy, onNavigationState]);
   useEffect(() => {
     /** 창 종료 시 미저장 입력과 진행 중 저장을 보호한다. */
-    function beforeUnload(event: BeforeUnloadEvent) { if (dirty || narrationDirty || busy || requestPending.current) { event.preventDefault(); event.returnValue = ""; } }
+    function beforeUnload(event: BeforeUnloadEvent) { if (dirty || narrationDirty || decisionDirty || busy || requestPending.current) { event.preventDefault(); event.returnValue = ""; } }
     window.addEventListener("beforeunload", beforeUnload);
     return () => window.removeEventListener("beforeunload", beforeUnload);
-  }, [dirty, narrationDirty, busy]);
+  }, [dirty, narrationDirty, decisionDirty, busy]);
 
   /** 쓰기 중 이동을 막고 새 회차/작품/회차 전환 및 삭제 전에 입력 폐기를 확인한다. */
   function canDiscardChanges() {
-    return !narrationSaving && !requestPending.current && (!(dirty || narrationDirty) || window.confirm("저장하지 않은 변경사항이 있습니다.\n변경 내용을 버리고 계속하시겠습니까?"));
+    return !decisionBusy && !narrationSaving && !requestPending.current && (!(dirty || narrationDirty || decisionDirty) || window.confirm("저장하지 않은 변경사항이 있습니다.\n변경 내용을 버리고 계속하시겠습니까?"));
   }
 
   /** 이전 회차 응답을 무효화하고 폼과 검토 방식의 기본값을 초기화한다. */
   function resetEditor() {
+    setDecisionDirty(false); setDecisionBusy(false);
     setNarrationDirty(false); setNarrationSaving(false);
     contentRequestIdRef.current++; contextRequestIdRef.current++; reviewRequestIdRef.current++; reviewStartRequestIdRef.current++; setSelectedEpisode(null); setDraft(null); setBaseline("");
     setContentMissing(false); setReadBlocked(false); setContentLoading(false);
@@ -382,7 +387,7 @@ function WorksScreen({ onNavigationState }: { onNavigationState?: (dirty: boolea
               {reviewError && <p className="error-message" role="alert">{reviewError}</p>}
               {reviewLoading && <p role="status">검토 기록을 불러오는 중입니다.</p>}
               {!reviewLoading && reviews.length === 0 && <p>최근 검토가 없습니다.</p>}
-              {!reviewLoading && reviews.length > 0 && <ReviewResultViewer reviews={reviews} />}
+              {reviews.length > 0 && <ReviewResultViewer key={selectedEpisode.id} reviews={reviews} onStateChange={handleDecisionState} />}
             </section>}
           </form> : !contentLoading && !readBlocked && <p>회차를 선택하거나 새 회차를 작성하세요.</p>}
         </div>

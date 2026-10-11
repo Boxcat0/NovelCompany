@@ -124,6 +124,7 @@ async function validate() {
     const before = target(destination); process.env.NOVEL_COMPANY_DATA_DIR = destination;
     const damaged = path.join(temporary, 'damaged.zip'); fs.writeFileSync(damaged, Buffer.from('not a zip')); rejectPackage(damaged, destination, before);
     const noManifest = path.join(temporary, 'no-manifest.zip'); writeZip(noManifest, rawEntries.filter(entry => entry.name !== 'manifest.json')); rejectPackage(noManifest, destination, before);
+    const unknownFormat = path.join(temporary, 'unknown-format.zip'); const futureEntries = entries(zipFile); const futureManifest = JSON.parse(futureEntries[0].data); futureManifest.formatVersion = 'NOVELCOMPANY_BACKUP_V2'; futureEntries[0].data = Buffer.from(JSON.stringify(futureManifest)); writeZip(unknownFormat, futureEntries); rejectPackage(unknownFormat, destination, before, 'BACKUP_FORMAT_UNSUPPORTED');
     const wrongHash = path.join(temporary, 'hash.zip'); const changed = entries(zipFile); changed.find(entry => entry.name.startsWith('manuscripts/')).data = Buffer.from('changed'); writeZip(wrongHash, changed); rejectPackage(wrongHash, destination, before);
     const missingTxt = path.join(temporary, 'missing-txt.zip'); const incomplete = entries(zipFile); const omitted = incomplete.find(entry => entry.name.startsWith('manuscripts/')); const manifest = JSON.parse(incomplete[0].data); manifest.files = manifest.files.filter(item => item.relativePath !== omitted.name); incomplete[0].data = Buffer.from(JSON.stringify(manifest)); writeZip(missingTxt, incomplete.filter(entry => entry !== omitted)); rejectPackage(missingTxt, destination, before, 'BACKUP_INVALID');
     for (const [name, change] of [
@@ -137,10 +138,10 @@ async function validate() {
       ['duplicate-path', buffer => { const manuscripts = rawEntries.filter(entry => entry.name.startsWith('manuscripts/')); const old = Buffer.from(manuscripts[1].name), next = Buffer.from(manuscripts[0].name); assert.equal(old.length, next.length); for (let at = buffer.indexOf(old); at >= 0; at = buffer.indexOf(old, at + old.length)) next.copy(buffer, at); }],
       ['crc', buffer => { buffer[30 + Buffer.byteLength('manifest.json')] ^= 1; }],
     ]) { const file = path.join(temporary, name + '.zip'); attackPackage(zipFile, file, change); rejectPackage(file, destination, before); }
-    const future = path.join(temporary, 'new-schema.zip'); mutateDatabasePackage(zipFile, future, temporary, db => db.prepare('INSERT INTO schema_migrations VALUES (15, ?, ?)').run('015_future.sql', new Date().toISOString())); rejectPackage(future, destination, before, 'BACKUP_SCHEMA_UNSUPPORTED');
+    const future = path.join(temporary, 'new-schema.zip'); mutateDatabasePackage(zipFile, future, temporary, db => db.prepare('INSERT INTO schema_migrations VALUES (16, ?, ?)').run('016_future.sql', new Date().toISOString())); rejectPackage(future, destination, before, 'BACKUP_SCHEMA_FUTURE');
     const invalidFk = path.join(temporary, 'fk.zip'); mutateDatabasePackage(zipFile, invalidFk, temporary, db => { db.exec('PRAGMA foreign_keys = OFF'); db.prepare('UPDATE episodes SET work_id = ?').run('missing-work'); }); rejectPackage(invalidFk, destination, before, 'BACKUP_DATABASE_INVALID');
-    const older = path.join(temporary, 'older.zip'); mutateDatabasePackage(zipFile, older, temporary, db => db.exec('DELETE FROM schema_migrations WHERE version = 14')); rejectPackage(older, destination, before, 'BACKUP_SCHEMA_UNSUPPORTED');
-    const wrongSchema = path.join(temporary, 'wrong-schema.zip'); mutateDatabasePackage(zipFile, wrongSchema, temporary, db => db.exec('DROP TRIGGER review_job_processor_immutable')); rejectPackage(wrongSchema, destination, before, 'BACKUP_SCHEMA_UNSUPPORTED');
+    const older = path.join(temporary, 'older.zip'); mutateDatabasePackage(zipFile, older, temporary, db => db.exec('DELETE FROM schema_migrations WHERE version = 15')); rejectPackage(older, destination, before, 'BACKUP_SCHEMA_INVALID');
+    const wrongSchema = path.join(temporary, 'wrong-schema.zip'); mutateDatabasePackage(zipFile, wrongSchema, temporary, db => db.exec('DROP TRIGGER review_job_processor_immutable')); rejectPackage(wrongSchema, destination, before, 'BACKUP_SCHEMA_INVALID');
     const unsafeRef = path.join(temporary, 'unsafe-ref.zip'); mutateDatabasePackage(zipFile, unsafeRef, temporary, db => db.prepare('UPDATE episodes SET storage_key = ? WHERE id = ?').run('../outside.txt', fixture.episodes[0].id)); rejectPackage(unsafeRef, destination, before, 'BACKUP_FILES_MISSING');
     const sensitive = path.join(temporary, 'sensitive.zip'); mutateDatabasePackage(zipFile, sensitive, temporary, db => db.prepare('INSERT INTO app_settings VALUES (?, ?, ?)').run('api_key', 'mock-key-only', new Date().toISOString())); rejectPackage(sensitive, destination, before, 'BACKUP_SENSITIVE_SETTINGS');
     const missingSource = path.join(destination, 'works', ...Object.keys(before.txt)[0].split('/')); fs.renameSync(missingSource, missingSource + '.hidden');
@@ -153,11 +154,13 @@ async function validate() {
     for (const stage of ['old-database', 'old-works', 'new-database', 'new-works', 'verified', 'committed']) {
       assert.throws(() => service.replaceData(destination, zipFile, '0.1.0', { hook: phase => { if (phase === stage) throw new Error('injected ' + stage); } }), error => error.code === 'RESTORE_FAILED');
       assert.deepEqual(snapshot(), before.database); assert.deepEqual(manuscripts(destination), before.txt); assert.equal(fs.existsSync(path.join(destination, service.JOURNAL)), false);
+      assert.equal(fs.existsSync(path.join(destination, '.transfer-baseline.json')), false);
     }
     console.log('PASS rollback: automatic backup failure unchanged, all six replacement phases restore original DB/TXT');
     service.replaceData(destination, zipFile, '0.1.0'); assert.throws(() => getDatabase());
     service.recoverInterruptedRestore(destination); initializeDatabase(path.join(destination, 'novelcompany.db'));
     assert.deepEqual(snapshot(), sourceBefore); assert.deepEqual(manuscripts(destination), txtBefore); assert.equal(fs.existsSync(missingSource), false);
+    assert.ok(fs.existsSync(path.join(destination, '.transfer-baseline.json')));
     assert.equal(fs.readFileSync(path.join(destination, 'machine-settings.json'), 'utf8'), '{"preserve":true}');
     const automatic = fs.readdirSync(path.join(destination, 'backups')).filter(name => name.endsWith('.zip'));
     const previous = service.validatePackage(path.join(destination, 'backups', automatic.at(-1)), path.join(temporary, 'automatic'));
@@ -168,7 +171,7 @@ async function validate() {
     for (const stage of ['old-database', 'old-works', 'new-database', 'new-works', 'verified', 'committed']) {
       const root = path.join(temporary, 'crash-' + stage), original = target(root); closeDatabase();
       const crash = spawnSync(process.execPath, [__filename, '--crash', root, zipFile, stage], { encoding: 'utf8', windowsHide: true, timeout: 30000 });
-      assert.equal(crash.status, 86, crash.stderr);
+      assert.equal(crash.status, 86, `${crash.error?.message ?? ''} ${crash.signal ?? ''} ${crash.stderr ?? ''}`);
       const recover = spawnSync(process.execPath, [__filename, '--recover', root], { encoding: 'utf8', windowsHide: true, timeout: 30000 });
       assert.equal(recover.status, 0, recover.stderr);
       const recovered = JSON.parse(recover.stdout.trim()); assert.deepEqual(recovered, stage === 'committed' ? { database: sourceBefore, txt: txtBefore } : original);

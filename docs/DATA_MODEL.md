@@ -1,5 +1,24 @@
 # NovelCompany 데이터 모델 설계
 
+## Task031 — Schema 015 / Author Decision Events
+
+`015_add_review_finding_decision_events.sql`만 추가하며 Migration 001~014 및 기존 ReviewFinding 계약은 변경하지 않는다.
+
+| 컬럼 | 계약 |
+|---|---|
+| id | 이벤트 UUID PK |
+| finding_id | review_findings.id FK, ON DELETE CASCADE |
+| decision_status | NEEDS_FIX / REJECTED / DEFERRED / RESOLVED CHECK |
+| note | NOT NULL TEXT, API 최대 4,000 UTF-16 코드 단위, NUL 거부, 앞뒤 공백 정리 |
+| revision | 양의 정수, Finding별 직전 revision + 1 |
+| created_at | ISO 시각, 최신 상태 선정 기준으로 사용하지 않음 |
+
+`UNIQUE(finding_id, revision)`가 이력/최신 상태 조회 인덱스를 겸한다. 현재 상태는 가장 높은 revision의 이벤트다. 이벤트가 없으면 가상 UNREVIEWED(revision 0)를 반환하고 행을 삽입하지 않는다. 별도 current 상태 컬럼/테이블은 없다. INSERT 순번, UPDATE 금지, 부모가 존재하는 직접 DELETE 금지 트리거로 append-only를 보장한다. 부모 Finding 삭제 시 하위 이력은 cascade 정리된다. 기존 Work/Episode/Run 삭제 제한은 그대로 유지하고 Canon 전체 삭제는 판단 이력에 영향을 주지 않는다.
+
+Repository는 Work→Episode→Run→Finding을 검증하며 `expectedRevision`이 현재 값과 다르면 한국어 충돌 오류로 저장을 거부한다. 원자적 저장, 같은 상태·메모 no-op, 네 가지 상태 간 재변경을 지원한다. UNREVIEWED로 초기화하거나 과거 이벤트를 수정/삭제하는 API는 없다. Freshness와 독립적이며 다른 Run으로 승계하지 않는다.
+
+Schema 015 전체 ZIP에 이벤트 전체를 보관한다. 정식 014 ZIP은 격리 Migration 후 빈 판단 테이블을 갖는다. 기존 Review/TXT 원본은 보존한다. HF03-B 논리 병합 대상에 이벤트를 추가하지 않으며 로컬 이력은 유지하고 원격 이력은 제외한다. 양방향 판단 이력 병합은 후속 별도 설계 대상이다. 아래 Task별 Schema 번호는 당시 계약이며 현재 최신 지원은 015다.
+
 ## Task030-HF02 — Backup Package V1
 
 새 DB migration이나 테이블을 추가하지 않는다. 패키지는 SQLite의 모든 영속 행(기존 Legacy 포함)과 등록된 Episode TXT 원본을 그대로 보관한다. logical storage_key는 변경하지 않고 가져올 PC의 데이터 root/works에 상대 경로를 연결한다. 현재 앱 관리 자산은 회차 TXT뿐이다.
@@ -596,3 +615,8 @@ Generic 값/참조는 Record와 Field를 함께 참조하고 option value는 Fie
 `CanonDeletionStatus`는 exists, canonSpaceId, setCount, fieldCount, optionCount, recordCount, fieldValueCount, recordOptionValueCount, referenceCount, legacyDataCount, totalDependentRowCount를 반환한다. 전체 의존 행 수에는 CanonSpace 자체를 포함하지 않는다. Work만 있으면 exists=false, canonSpaceId=null, 모든 count=0이다. 없는 Work는 WORK_NOT_FOUND이며 공간 없는 실제 삭제는 CANON_SPACE_NOT_FOUND다.
 
 `deleteCanonForWork(workId)` 성공 DTO는 `{ workId, deletedCanonSpaceId }`다. 공간 소속 행과 공간만 제거하며 Work와 Episode metadata 및 파일은 소유 삭제 범위 밖이다. 삭제 이후 `hasCanonSpace=false`; Work 삭제 가능 여부는 여전히 Episode 개수와 함께 판단한다.
+## Task030-HF03 — 백업 기준본과 논리 병합 단위
+
+ZIP Manifest V1은 기존 필수 필드를 유지하며 선택적 `syncBaseline: { version: 1, id, hashes }`를 추가한다. `hashes`의 키는 `work:<id>`, `canon:<id>`, `episode:<id>`이고 값은 정규화된 논리 내용 SHA-256이다. 수정 시각은 해시에서 제외하되 충돌 미리보기에는 표시한다. 로컬 `.transfer-baseline.json`은 최초 내보내기의 동일 기준본이며 운영 SQLite/TXT가 아니다. 이전 V1 ZIP처럼 기준본이 없는 패키지는 전체 덮어쓰기에 계속 사용할 수 있다.
+
+Canon 단위는 `canon_records`와 `canon_field_values`, `canon_record_option_values`, `canon_record_references`, `canon_record_aliases`를 함께 비교한다. Episode 단위는 `episodes` 행, 실제 TXT bytes 해시 및 현 TXT 해시에 맞는 `scene_narration_metadata`다. Work는 기본 metadata만 병합한다. Canon Definition(`canon_spaces`, `canon_sets`, `canon_fields`, `canon_field_options`)은 병합하지 않고 정확한 정체성과 내용을 사전 확인한다. Legacy Canon 표와 원격 ReviewJob/Run/Finding은 V1 업데이트 대상이 아니다. 추가 Migration은 없다.

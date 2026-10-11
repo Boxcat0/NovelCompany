@@ -1,5 +1,15 @@
 # NovelCompany 아키텍처
 
+## Task031 — ReviewFinding과 독립적인 작가 판단
+
+기존 ReviewResultViewer 안에서 Finding 원본과 작가 판단을 구분한다. `FindingDecisionEditor` → sandbox Preload `reviews.decisions` → `registerReviewHandlers` → `review-decision-repository` → Schema 015의 append-only 이벤트 순서로 저장한다. Main의 기존 data-operation gate를 적용하고 Work/Episode/Run/Finding 소속을 Repository에서 검증한다. ReviewJob과 Episode 편집 잠금 상태를 판단 상태로 재사용하지 않는다.
+
+Run별 최신 판단을 한 번에 조회하며 선택한 Finding만 이력을 조회한다. `expectedRevision`과 `BEGIN IMMEDIATE`로 동시 저장을 거부하고 동일 상태·메모는 no-op 처리한다. UI는 저장 중 중복 입력, 미저장 화면/회차/Finding/필터 이동, 늦은 응답의 화면 덮어쓰기를 보호한다. Review polling/새로고침은 판단 편집기를 unmount하지 않는다. 메모는 HTML이 아닌 일반 텍스트다.
+
+Freshness는 기존 TXT/Canon fingerprint로 계산한다. 판단 이벤트는 fingerprint, ReviewRun/Finding/Job, TXT, Canon을 변경하지 않는다. STALE/UNAVAILABLE에도 안내 후 판단을 기록할 수 있다. 재검토 결과는 새 Finding이므로 과거 판단을 승계하지 않는다. Legacy와 Finding 없는 STUB도 유지한다. RESOLVED는 작가 선언이며 자동 해결 검증이 아니다.
+
+Migration 015 적용 전 독립 DB 백업을 만들고 실패 시 중단한다. 전체 ZIP은 판단 이력을 포함한다. 정식 014 ZIP은 원본을 유지한 채 격리 사본에 015를 적용하며 미래/변조 Schema 검증은 유지한다. HF03-B는 로컬 전체 DB snapshot에서 기존 논리 단위만 갱신하므로 로컬 판단은 보존하고 원격 판단은 병합하지 않는다. 미리보기 이후 판단 변경도 전체 DB fingerprint 재검사로 적용을 중단한다. 실제 두 PC 간 가져오기 문제는 별도 보류 상태이며 Task031이 해결했다고 간주하지 않는다.
+
 ## Task030-HF02 — 수동 로컬 ZIP 백업과 전체 복원
 
 설정의 데이터 내보내기/가져오기는 Main 파일 선택 창과 `backup:export/preview/import/status/cancel-preview`, 편집 상태 알림 및 실제 단계 이벤트를 사용한다. Renderer는 경로 대신 Main이 검증한 창별 token만 전달한다. 가져오기 요약 이후 별도 native 최종 확인을 받고, 자동 백업이 성공한 뒤 전체 교체한다. sandbox/contextIsolation을 유지하며 Node와 파일시스템을 Renderer에 노출하지 않는다.
@@ -374,3 +384,10 @@ Task016 원본 정의는 `setup/initial-canon-definition.cjs`의 `TASK016_CANON_
 기존 004 DB는 005 전에 `backups/before-task022-<UUID>.db`로 백업한다. 백업 실패 시 migration을 진행하지 않는다. 005는 초기 Set/Field/Option 전체 구조와 일치하는 공간의 세 required flag만 변경한다. 부분/사용자 수정 정의를 무작정 보정하지 않는다. Bootstrap은 migration이 이미 적용된 빈 공간에도 대응하도록 삽입 직후 최종 required 정책을 적용한다.
 
 Task019/020의 `Canon 시작 = 빈 CanonSpace`, `Canon 전체 삭제 = 해당 공간 데이터 삭제` 정책은 유지한다. 명시적 Definition 복구는 별도 작업이다. 앱 시작/Canon 시작에서 자동 호출하지 않으며 범용 Preset, Template Registry, 다른 Work 자동 Bootstrap, Schema Editor, Copy, AI로 확장하지 않는다.
+## Task030-HF03 — Schema 호환 전체 덮어쓰기와 안전한 데이터 업데이트
+
+가져오기는 설정에서 `전체 덮어쓰기`와 `변경사항 업데이트`를 명시적으로 고른다. 전체 덮어쓰기는 ZIP의 SQLite와 등록 TXT를 모두 교체하며 현재 PC DB와 SQL Schema가 같을 필요는 없다. ZIP의 Migration 기록을 공식 001~014 접두열과 대조하고 해당 버전의 실제 SQL 객체를 공식 Migration으로 재현한 메모리 DB와 비교한다. 미래 버전·변조 객체는 거부한다. 공식 구형 버전은 원본 ZIP의 Manifest/CRC/SHA-256 검증 후 격리 추출본에만 후속 Migration을 적용한다. Journal에는 변환된 DB의 해시를 기록하며 원본 ZIP은 변경하지 않는다. Canon의 City Definition은 SQL Schema가 아닌 데이터 행이다.
+
+업데이트는 Work/CanonSpace ID와 Canon Set/Field/Option의 실제 구조가 같아야 한다. 최초 수동 내보내기는 DB/TXT를 바꾸지 않고 루트의 `.transfer-baseline.json`에 항목별 내용 해시와 무작위 기준본 ID를 기록하며 ZIP Manifest에도 이를 담는다. 두 PC가 같은 기준본을 공유해야 한쪽만 변경한 항목·신규 생성·삭제를 자동 판정한다. 기준본이 없거나 다른 경우, 같은 항목을 양쪽에서 바꾼 경우, 동명 다른 ID, 참조/제약 위반은 충돌로 전체 중단한다. 수정 시각은 표시만 하고 승자를 정하지 않는다. 현재 UI는 개별 충돌 선택을 구현하지 않는다.
+
+병합 단위는 Work 기본 정보, Canon Record와 값/Option/Reference/Alias, Episode 메타데이터/TXT 및 현재 TXT 해시에 유효한 Scene Narration이다. ReviewJob의 원격 QUEUED/RUNNING과 원격 Run/Finding은 가져오지 않고 로컬 이력을 보존한다. 임시 DB/TXT에서 병합·FK/필수 Canon Field·해시를 검증하고, 미리보기 이후 현재 DB/원고의 변경을 재확인한다. 최종 승인 뒤 기존 자동 백업·Worker gate·Restore Journal·rollback·재시작 경로로 검증된 병합본을 교체한다. 기준본 파일도 Journal의 원본 보존/복구 대상이다. Finding 작가 판단 이력의 병합 정책은 Task031 이후 별도로 정한다.

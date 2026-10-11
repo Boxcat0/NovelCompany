@@ -376,7 +376,7 @@ async function runValidation() {
       "getEpisodeWorkContext",
       "getEpisodeReviewContext",
     ]);
-    assert.deepEqual(Object.keys(runtimePreloadApi.reviews), ["start", "submit", "getQueue", "getJobByEpisode", "cancelQueued", "getByEpisode", "getById"]);
+    assert.deepEqual(Object.keys(runtimePreloadApi.reviews), ["start", "submit", "getQueue", "getJobByEpisode", "cancelQueued", "getByEpisode", "getById", "decisions"]);
     assert.equal("ipcRenderer" in runtimePreloadApi, false);
     assert.equal("require" in runtimePreloadApi, false);
 

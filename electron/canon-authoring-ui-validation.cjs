@@ -83,7 +83,7 @@ async function exerciseCanonAuthoring(mode = "normal") {
   check(document.getElementById(fieldId('required_attribute')).value === '', 'Legacy field must remain unassigned');
   await fill(fieldId('description'), '기존 미설정 설명 보완');
   click('저장');
-  await waitFor(() => document.body.textContent.includes('저장되었습니다.') && !button('저장').disabled, 'Legacy edit without attribute');
+  await waitFor(() => document.body.textContent.includes('저장되었습니다.') && button('저장')?.disabled === false, 'Legacy edit without attribute');
   check([...document.querySelectorAll('.canon-record-list button')].some(item => item.textContent.includes('기존 미설정 스킬 · 필요 속성 미설정')), 'Legacy status stays missing');
   await reference('required_attribute', '임시 UI 속성');
   await save('기존 미설정 스킬');

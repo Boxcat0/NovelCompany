@@ -1,5 +1,15 @@
 # NovelCompany 개발 계획
 
+## Task031 — Review Finding Resolution & Author Decisions
+
+기존 ReviewResultViewer에 작가 판단 상태·메모·이력·필터를 통합한다. 가상 UNREVIEWED와 네 가지 저장 상태, append-only 이벤트, Finding별 revision, 동시 저장 충돌, 같은 값 no-op을 구현한다. 기존 Review 원본, Legacy/STUB/RULE_V1, Queue, Freshness를 유지하고 재검토 결과에 판단을 자동 승계하지 않는다.
+
+Schema 015와 적용 전 백업, 014 ZIP의 격리 Migration, 015 판단 이력 전체 복원, HF03-B의 로컬 판단 보존/원격 판단 제외를 검증한다. 기존 City CLI의 최신 Schema 확인도 015에 맞춘다. 실제 PC 간 ZIP 가져오기 문제는 보류 상태를 유지한다.
+
+`test:review-decisions`는 격리 DB/Storage/Profile에서 원본 불변·네 상태·이력·동시 저장·scope·rollback·lifecycle·현재성·재검토·Migration/ZIP/업데이트와 실제 Electron Preload/IPC/UI의 저장·필터·dirty·지연 응답을 검사한다. 기존 전체 회귀 명령과 typecheck/build도 실행한다. Production DB/TXT는 테스트에 사용하지 않는다.
+
+Task032 준비 범위는 검증된 판단 데이터와 조회 계약까지다. 편집부 자동 작업 생성, AI, TXT/Canon 수정, 자동 Diff, 판단 승계/병합은 구현하지 않는다.
+
 ## Task030-HF02 — Local Data Backup & Restore V1
 
 설정 화면에 현재 작품/회차/Schema 요약과 수동 ZIP 내보내기·가져오기를 추가했다. Main 파일 선택, 경로 없는 IPC, 검증 token, 전체 교체 최종 확인, 실제 단계 표시 및 중복 클릭/이동/종료 보호를 적용한다. 기존 sandbox 보안을 유지한다.
@@ -237,3 +247,6 @@ Migration 011, Scene API/UI, ReviewContext DTO, 독립 scene fingerprint와 Job/
 - 설치 및 업데이트
 - PC② 독립 실행
 - 백업 및 복구
+## Task030-HF03 — 가져오기 두 모드
+
+HF03-A: 공식 Migration 001~014 버전별 Schema 검증, 013→014 등 격리 Migration, 미래/변조 거부, 원본 ZIP·자동 백업·Journal 보존을 구현했다. HF03-B: 공통 기준본 해시를 사용한 보수적 Work/Canon Record/Episode 병합, 충돌 전체 차단, 임시 병합본 검증, 미리보기 후 변경 감지, 로컬 Review 이력 보존, 설정 UI 모드 선택을 구현했다. `test:data-transfer-modes`는 격리 DB/TXT에서 구형 복원·기준본 병합·충돌·stale 감지를 검증한다. 충돌별 수동 선택, 서로 다른 Work/Definition 이전 및 Task031 Finding 작가 판단 이력 병합은 후속 정책이다.

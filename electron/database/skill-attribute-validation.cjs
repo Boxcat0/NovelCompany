@@ -90,7 +90,7 @@ function validateUpgrade(root) {
   closeDatabase();
   initializeDatabase(file);
   const upgraded = getDatabase();
-  assert.equal(upgraded.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count, 14);
+  assert.equal(upgraded.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count, 15);
   const newField = getCanonDefinitionBySetId(scope.skill.setId).fields.find(item => item.key === 'required_attribute');
   assert.equal(newField.referenceSet.id, scope.attribute.setId);
   assert.deepEqual(upgraded.prepare('SELECT * FROM canon_records WHERE id = ?').get(oldSkill.id), recordBefore);

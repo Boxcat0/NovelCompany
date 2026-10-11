@@ -2,13 +2,17 @@ const { getReviewById, getReviewsByEpisode } = require("../review/review-service
 const { createReviewQueue } = require('../review/review-queue-service.cjs');
 const { executeIpcAction } = require("./ipc-action.cjs");
 const { IPC_CHANNELS } = require("./ipc-channels.cjs");
+const decisions = require('../database/repositories/review-decision-repository.cjs');
 
 const registeredIpcMains = new WeakSet();
 
-/** Renderer Review 요청을 service로만 전달하고 Result bridge를 한 번만 등록한다. */
+/** Review와 작가 판단 요청을 범위 검증 서비스·Repository 및 공통 Result gate에 연결한다. */
 function registerReviewHandlers(ipcMain, episodeStorage, queue = createReviewQueue(episodeStorage)) {
   if (registeredIpcMains.has(ipcMain)) return;
   queue.start();
+  ipcMain.handle(IPC_CHANNELS.REVIEW_DECISIONS_LIST, (_event, input) => executeIpcAction(IPC_CHANNELS.REVIEW_DECISIONS_LIST, () => decisions.listFindingDecisionsForRun(input)));
+  ipcMain.handle(IPC_CHANNELS.REVIEW_DECISIONS_HISTORY, (_event, input) => executeIpcAction(IPC_CHANNELS.REVIEW_DECISIONS_HISTORY, () => decisions.listFindingDecisionHistory(input)));
+  ipcMain.handle(IPC_CHANNELS.REVIEW_DECISIONS_APPEND, (_event, input) => executeIpcAction(IPC_CHANNELS.REVIEW_DECISIONS_APPEND, () => decisions.appendFindingDecision(input)));
   ipcMain.handle(IPC_CHANNELS.REVIEW_START, (_event, input) => executeIpcAction(IPC_CHANNELS.REVIEW_START, () => queue.submit(input)));
   ipcMain.handle(IPC_CHANNELS.REVIEW_SUBMIT, (_event, input) => executeIpcAction(IPC_CHANNELS.REVIEW_SUBMIT, () => queue.submit(input)));
   ipcMain.handle(IPC_CHANNELS.REVIEW_GET_QUEUE, () => executeIpcAction(IPC_CHANNELS.REVIEW_GET_QUEUE, () => queue.getQueue()));

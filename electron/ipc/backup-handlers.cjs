@@ -8,6 +8,7 @@ const { RepositoryError } = require('../database/repositories/repository-error.c
 const { executeIpcAction } = require('./ipc-action.cjs');
 const gate = require('../backup/data-operation-gate.cjs');
 const service = require('../backup/data-backup-service.cjs');
+const updateService = require('../backup/data-update-service.cjs');
 const { logIpcError } = require('../logging/logger.cjs');
 const registered = new WeakSet();
 
@@ -63,8 +64,10 @@ function registerBackupHandlers(ipcMain, options) {
     // 기존 파일은 새 이름을 요구한다. OS overwrite 확인과 상관없이 데이터 보존을 우선한다.
     return service.exportSnapshot(root, selected.filePath, applicationVersion);
   })));
-  ipcMain.handle('backup:preview', (event, ...args) => executeIpcAction('backup:preview', () => exclusive(event, async () => {
-    noArguments(args); discard(event.sender.id); gate.setPhase('가져올 백업 선택 중');
+  ipcMain.handle('backup:preview', (event, mode = 'overwrite', ...args) => executeIpcAction('backup:preview', () => exclusive(event, async () => {
+    noArguments(args);
+    if (!['overwrite', 'update'].includes(mode)) throw new RepositoryError('BACKUP_INPUT_INVALID', '가져오기 방식을 다시 선택해 주세요.');
+    discard(event.sender.id); gate.setPhase('가져올 백업 선택 중');
     const selected = await dialog.showOpenDialog({ title: '데이터 가져오기', properties: ['openFile'], filters: [{ name: 'NovelCompany 백업 ZIP', extensions: ['zip'] }] });
     if (selected.canceled || selected.filePaths.length !== 1) return null;
     gate.setPhase('백업 구조·해시·DB 검증 중');
@@ -74,8 +77,10 @@ function registerBackupHandlers(ipcMain, options) {
       if (fs.statSync(source).size > require('../backup/backup-zip.cjs').LIMITS.archive) throw new RepositoryError('BACKUP_INVALID', '백업 ZIP 크기 제한을 초과했습니다.');
       const file = path.join(directory, 'backup.zip'); fs.copyFileSync(source, file, fs.constants.COPYFILE_EXCL);
       const validated = service.validatePackage(file, path.join(directory, 'validated'));
-      const token = randomUUID(); pending.set(event.sender.id, { directory, file, token, summary: service.publicSummary(validated) });
-      return { ...service.publicSummary(validated), token };
+      const plan = mode === 'update' ? updateService.previewUpdate(root, path.join(directory, 'validated'), validated, directory, applicationVersion) : null;
+      const summary = { ...service.publicSummary(validated), mode, ...(plan ? { automaticCount: plan.apply.length, conflictCount: plan.conflicts.length, unchangedCount: plan.unchangedCount, commonBaseline: plan.commonBaseline, conflicts: plan.conflicts } : {}) };
+      const token = randomUUID(); pending.set(event.sender.id, { directory, file, token, summary, mode, plan });
+      return { ...summary, token };
     } catch (error) { fs.rmSync(directory, { recursive: true, force: true }); throw error; }
   })));
   ipcMain.handle('backup:cancel-preview', (event, ...args) => executeIpcAction('backup:cancel-preview', () => { noArguments(args); discard(event.sender.id); return null; }));
@@ -83,12 +88,16 @@ function registerBackupHandlers(ipcMain, options) {
     noArguments(args);
     const prepared = pending.get(event.sender.id);
     if (!prepared || typeof token !== 'string' || token !== prepared.token) throw new RepositoryError('BACKUP_INPUT_INVALID', '검증한 백업을 다시 선택해 주세요.');
-    gate.setPhase('전체 교체 최종 확인 대기 중');
+    if (prepared.mode === 'update' && (prepared.plan.conflicts.length || !prepared.plan.mergedZip)) throw new RepositoryError('UPDATE_CONFLICT', '해결되지 않은 충돌이 있거나 적용할 변경사항이 없습니다. 미리보기를 확인해 주세요.');
+    gate.setPhase(prepared.mode === 'update' ? '변경사항 업데이트 최종 확인 대기 중' : '전체 교체 최종 확인 대기 중');
     const summary = prepared.summary;
-    const confirmation = await dialog.showMessageBox({ type: 'warning', title: '현재 데이터 전체 교체', message: '현재 PC의 모든 작품·Canon·원고·검토 이력을 백업의 내용으로 교체합니다.', detail: `백업 생성일: ${summary.createdAt}\n작품: ${summary.workCount}개 / 회차: ${summary.episodeCount}개\nDB Schema: ${summary.databaseSchemaVersion}\n기존 데이터 자동 백업에 성공한 후에만 교체합니다. 병합하지 않습니다. 완료 후 앱을 재시작합니다.`, buttons: ['취소', '전체 교체 및 재시작'], defaultId: 0, cancelId: 0, noLink: true });
+    const confirmation = prepared.mode === 'update'
+      ? await dialog.showMessageBox({ type: 'warning', title: '변경사항 업데이트', message: `검증한 변경사항 ${summary.automaticCount}건을 현재 데이터에 병합합니다.`, detail: `백업 생성일: ${summary.createdAt}\n충돌: ${summary.conflictCount}건\n현재 데이터 자동 백업에 성공한 후에만 교체합니다. 로컬 Review 이력은 보존됩니다. 완료 후 앱을 재시작합니다.`, buttons: ['취소', '업데이트 및 재시작'], defaultId: 0, cancelId: 0, noLink: true })
+      : await dialog.showMessageBox({ type: 'warning', title: '현재 데이터 전체 교체', message: '현재 PC의 모든 작품·Canon·원고·검토 이력을 백업의 내용으로 교체합니다.', detail: `백업 생성일: ${summary.createdAt}\n작품: ${summary.workCount}개 / 회차: ${summary.episodeCount}개\nDB Schema: ${summary.databaseSchemaVersion}\n기존 데이터 자동 백업에 성공한 후에만 교체합니다. 병합하지 않습니다. 완료 후 앱을 재시작합니다.`, buttons: ['취소', '전체 교체 및 재시작'], defaultId: 0, cancelId: 0, noLink: true });
     if (confirmation.response !== 1) return null;
     try {
-      const result = service.replaceData(root, prepared.file, applicationVersion, { stopWorker: () => queue.stop(), restartWorker: () => queue.restart() });
+      if (prepared.mode === 'update') updateService.assertUnchanged(root, prepared.plan.fingerprint);
+      const result = service.replaceData(root, prepared.mode === 'update' ? prepared.plan.mergedZip : prepared.file, applicationVersion, { stopWorker: () => queue.stop(), restartWorker: () => queue.restart() });
       // 완료한 데이터 교체는 선택 파일 정리 오류로 실패 처리하거나 잠금을 풀지 않는다.
       try { discard(event.sender.id); } catch (cause) { logIpcError({ channel: 'backup:import', code: 'BACKUP_CLEANUP_FAILED', message: '복원은 완료했으나 선택 파일 정리를 완료하지 못했습니다.', cause }); }
       try { onRestored(); } catch { throw new RepositoryError('RESTORE_RESTART_REQUIRED', '복원은 완료했습니다. 안전하게 연결하려면 프로그램을 종료하고 다시 시작해 주세요.'); }

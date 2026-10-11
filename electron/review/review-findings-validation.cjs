@@ -169,7 +169,7 @@ async function validateMigration(root) {
   const legacy = runs.createRun({ ...input, ...source, processorKey: 'STUB_V1', contextMode: 'RELEVANT_CANON_V1', fingerprintVersion: 'V2' });
   completeLegacyRun(legacy.id, [{ category: 'TYPO', message: '과거 메시지' }]);
   const db = getDatabase();
-  db.exec('DROP TRIGGER review_job_processor_immutable; ALTER TABLE review_jobs DROP COLUMN processor_key; ALTER TABLE review_runs DROP COLUMN findings_contract_version; ALTER TABLE review_findings DROP COLUMN contract_version; ALTER TABLE review_findings DROP COLUMN details_json; DELETE FROM schema_migrations WHERE version >= 13');
+  db.exec('DROP TABLE review_finding_decision_events; DROP TRIGGER review_job_processor_immutable; ALTER TABLE review_jobs DROP COLUMN processor_key; ALTER TABLE review_runs DROP COLUMN findings_contract_version; ALTER TABLE review_findings DROP COLUMN contract_version; ALTER TABLE review_findings DROP COLUMN details_json; DELETE FROM schema_migrations WHERE version >= 13');
   const before = db.prepare('SELECT * FROM review_runs').all(); const oldFindings = db.prepare('SELECT * FROM review_findings').all();
   closeDatabase();
   const blocked = path.join(root, 'blocked'); fs.mkdirSync(blocked); fs.copyFileSync(file, path.join(blocked, 'db')); fs.writeFileSync(path.join(blocked, 'backups'), '백업 실패 fixture');

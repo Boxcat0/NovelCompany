@@ -274,8 +274,8 @@ async function validate() {
     initializeDatabase(path.join(root, 'novelcompany.db'));
     const storage = new LocalEpisodeStorage(root);
     validateDefinitionAndUpgrade(storage); validateUpgradeFailures(); validateCrudAndLifecycle(storage); await validateReviewCompatibility(storage);
-    assert.equal(getDatabase().prepare('SELECT MAX(version) version FROM schema_migrations').get().version, 14);
-    console.log('Task030-HF01 City Canon validation passed. Isolated DB/Storage only; no migration 015.');
+    assert.equal(getDatabase().prepare('SELECT MAX(version) version FROM schema_migrations').get().version, 15);
+    console.log('Task030-HF01 City Canon validation passed. Isolated DB/Storage only; no City-specific migration.');
   } finally { closeDatabase(); if (original === undefined) delete process.env.NOVEL_COMPANY_DATA_DIR; else process.env.NOVEL_COMPANY_DATA_DIR = original; }
 }
 

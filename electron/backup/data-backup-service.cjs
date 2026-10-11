@@ -2,18 +2,19 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID, createHash } = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
-const { runMigrations } = require('../database/migrate.cjs');
+const { runMigrations, readMigrationFiles } = require('../database/migrate.cjs');
 const { getDatabase, closeDatabase, initializeDatabase } = require('../database/database.cjs');
 const { LocalEpisodeStorage } = require('../storage/local-episode-storage.cjs');
 const { RepositoryError } = require('../database/repositories/repository-error.cjs');
 const { logIpcError } = require('../logging/logger.cjs');
 const gate = require('./data-operation-gate.cjs');
 const { LIMITS, safeEntry, openZip, writeZip } = require('./backup-zip.cjs');
+const baselineStore = require('./transfer-baseline.cjs');
 const FORMAT = 'NOVELCOMPANY_BACKUP_V1';
 const DB_ENTRY = 'database/novelcompany.db';
 const JOURNAL = '.restore-journal.json';
 const migrations = path.join(__dirname, '../database/migrations');
-let expectedSchema;
+const expectedSchemas = new Map();
 
 /** 파일 내용의 SHA256을 계산한다. */
 function sha256(data) { return createHash('sha256').update(data).digest('hex'); }
@@ -30,24 +31,36 @@ function assertPlainPath(target, directory = false) {
     if (stat.isSymbolicLink() || (i < parts.length - 1 || directory ? !stat.isDirectory() : !stat.isFile())) fail('BACKUP_UNSAFE_PATH', '관리 데이터 경로에 링크 또는 예상 밖 파일이 있습니다. 데이터 위치를 확인해 주세요.');
   }
 }
-/** 현재 배포 migration으로 만든 필수 SQL Schema를 별도 메모리 DB에서 확보한다. */
+/** 공식 Migration으로 만든 버전별 SQL 객체를 비교 가능한 형태로 읽는다. */
 function schemaDefinition(db) {
   return db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY type, name").all().map(row => ({ ...row }));
 }
-/** 읽기 전용 DB의 Schema·migration·무결성·FK 및 이동 가능한 파일 참조를 확인한다. */
+/** 읽기 전용 DB가 기록한 버전의 공식 Schema·무결성·FK·이동 가능한 파일 참조를 확인한다. */
 function inspectDatabase(file) {
   assertPlainPath(file);
   const db = new DatabaseSync(file, { readOnly: true });
   try {
     db.exec('PRAGMA trusted_schema = OFF');
-    if (!expectedSchema) {
+    const migrationFiles = readMigrationFiles(migrations);
+    let versions;
+    try { versions = db.prepare('SELECT version, name FROM schema_migrations ORDER BY version').all(); }
+    catch { fail('BACKUP_SCHEMA_INVALID', 'DB에 정식 Schema 버전 기록이 없습니다.'); }
+    const latest = versions.at(-1)?.version ?? 0;
+    if (latest > migrationFiles.length) fail('BACKUP_SCHEMA_FUTURE', '현재 프로그램보다 새로운 SQLite Schema입니다. 프로그램을 업데이트해 주세요.');
+    if (!versions.length || versions.some((row, index) => row.version !== index + 1 || row.name !== migrationFiles[index]?.name)) fail('BACKUP_SCHEMA_UNSUPPORTED', '정식 Migration 기록이 일치하지 않아 이 DB를 복원할 수 없습니다.');
+    if (!expectedSchemas.has(latest)) {
       const memory = new DatabaseSync(':memory:');
-      try { memory.exec('PRAGMA foreign_keys = ON'); runMigrations(memory, migrations); expectedSchema = schemaDefinition(memory); } finally { memory.close(); }
+      try { memory.exec('PRAGMA foreign_keys = ON'); runMigrations(memory, migrations, latest); expectedSchemas.set(latest, schemaDefinition(memory)); } finally { memory.close(); }
     }
-    if (JSON.stringify(schemaDefinition(db)) !== JSON.stringify(expectedSchema)) fail('BACKUP_SCHEMA_UNSUPPORTED', '필수 앱 Schema가 다르거나 변경되었습니다. 복원을 중단했습니다.');
-    const versions = db.prepare('SELECT version, name FROM schema_migrations ORDER BY version').all();
-    const migrationFiles = fs.readdirSync(migrations).filter(name => /^\d{3}_.+\.sql$/.test(name)).sort();
-    if (versions.length !== migrationFiles.length || versions.some((row, index) => row.version !== index + 1 || row.name !== migrationFiles[index])) fail('BACKUP_SCHEMA_UNSUPPORTED', '지원하지 않는 DB Schema입니다. 이 버전에서 만든 백업을 사용해 주세요.');
+    const actual = schemaDefinition(db), expected = expectedSchemas.get(latest);
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+      const actualByName = new Map(actual.map(row => [row.type + ':' + row.name, row]));
+      const expectedByName = new Map(expected.map(row => [row.type + ':' + row.name, row]));
+      const missing = expected.filter(row => !actualByName.has(row.type + ':' + row.name)).map(row => row.name);
+      const changed = expected.filter(row => actualByName.has(row.type + ':' + row.name) && JSON.stringify(actualByName.get(row.type + ':' + row.name)) !== JSON.stringify(row)).map(row => row.name);
+      const extra = actual.filter(row => !expectedByName.has(row.type + ':' + row.name)).map(row => row.name);
+      fail('BACKUP_SCHEMA_INVALID', `DB 구조가 정식 Schema ${latest}과 다릅니다. 누락: ${missing.join(', ') || '없음'}; 변경: ${changed.join(', ') || '없음'}; 추가: ${extra.join(', ') || '없음'}.`);
+    }
     if (db.prepare('PRAGMA integrity_check').all().some(row => row.integrity_check !== 'ok')) fail('BACKUP_DATABASE_INVALID', '백업 SQLite 무결성 검사에 실패했습니다.');
     if (db.prepare('PRAGMA foreign_key_check').all().length) fail('BACKUP_DATABASE_INVALID', '백업 DB에 잘못된 참조가 있습니다.');
     // 현재 앱에는 인증/기기 설정 저장 기능이 없다. 향후 민감 설정을 DB에 도입하면 별도 이전 정책이 필요하다.
@@ -65,7 +78,7 @@ function inspectDatabase(file) {
       } catch { missing.push(row.id); }
     }
     if (missing.length) fail('BACKUP_FILES_MISSING', '허용된 관리 경로 밖의 원고 참조가 있습니다. 회차 ID: ' + missing.join(', '));
-    return { databaseSchemaVersion: versions.at(-1).version, workCount: db.prepare('SELECT COUNT(*) AS count FROM works').get().count, episodeCount: episodes.length, episodes };
+    return { databaseSchemaVersion: latest, workCount: db.prepare('SELECT COUNT(*) AS count FROM works').get().count, episodeCount: episodes.length, episodes };
   } finally { db.close(); }
 }
 /** Manifest의 정확한 목록·크기·SHA256과 DB/TXT 참조를 검증한 뒤에만 격리 파일을 만든다. */
@@ -74,7 +87,9 @@ function validatePackage(file, destination) {
   try {
     zip = openZip(file);
     const manifest = JSON.parse(zip.read('manifest.json').toString('utf8'));
-    if (manifest.formatVersion !== FORMAT || !Number.isFinite(Date.parse(manifest.createdAt)) || typeof manifest.applicationVersion !== 'string' || manifest.applicationVersion.length > 100 || !Array.isArray(manifest.files) || manifest.files.length !== zip.entries.size - 1) fail('BACKUP_INVALID', '지원하지 않거나 손상된 백업 Manifest입니다.');
+    if (manifest.formatVersion !== FORMAT) fail('BACKUP_FORMAT_UNSUPPORTED', '현재 프로그램이 지원하지 않는 백업 형식입니다.');
+    if (!Number.isFinite(Date.parse(manifest.createdAt)) || typeof manifest.applicationVersion !== 'string' || manifest.applicationVersion.length > 100 || !Array.isArray(manifest.files) || manifest.files.length !== zip.entries.size - 1) fail('BACKUP_INVALID', '손상된 백업 Manifest입니다.');
+    if (manifest.syncBaseline !== undefined) baselineStore.validateBaseline(manifest.syncBaseline);
     const names = new Set();
     for (const item of manifest.files) {
       if (!item || typeof item.relativePath !== 'string') fail('BACKUP_INVALID', '백업 파일 목록이 올바르지 않습니다.');
@@ -93,14 +108,30 @@ function validatePackage(file, destination) {
       const fd = fs.openSync(target, 'wx');
       try { fs.writeFileSync(fd, zip.read(item.relativePath)); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
     }
-    const summary = inspectDatabase(path.join(destination, DB_ENTRY));
-    if (summary.databaseSchemaVersion !== manifest.databaseSchemaVersion || manifest.files.length !== summary.episodes.length + 1) fail('BACKUP_INVALID', 'DB와 Manifest 또는 원고 목록이 일치하지 않습니다.');
-    for (const episode of summary.episodes) {
+    const databaseFile = path.join(destination, DB_ENTRY);
+    const source = inspectDatabase(databaseFile);
+    if (source.databaseSchemaVersion !== manifest.databaseSchemaVersion || manifest.files.length !== source.episodes.length + 1) fail('BACKUP_INVALID', 'DB와 Manifest 또는 원고 목록이 일치하지 않습니다.');
+    for (const episode of source.episodes) {
       const item = manifest.files.find(item => item.relativePath === 'manuscripts/' + episode.storage_key);
       if (!item) fail('BACKUP_FILES_MISSING', '백업에 등록된 회차 원고가 없습니다. 회차 ID: ' + episode.id);
       if (episode.content_hash !== null && episode.content_hash !== item.sha256) fail('BACKUP_HASH_MISMATCH', 'DB의 원고 해시와 실제 TXT가 일치하지 않습니다. 회차 ID: ' + episode.id);
     }
-    return { manifest, summary };
+    // 원본 ZIP은 건드리지 않고, 이미 해시를 검증한 격리 복사본에만 정식 Migration을 적용한다.
+    if (source.databaseSchemaVersion < readMigrationFiles(migrations).length) {
+      const writable = new DatabaseSync(databaseFile);
+      try {
+        writable.exec('PRAGMA foreign_keys = ON');
+        runMigrations(writable, migrations);
+      } catch {
+        fail('BACKUP_MIGRATION_UNSUPPORTED', '구형 DB를 정식 Migration으로 변환하지 못했습니다. 원본 ZIP은 변경되지 않았습니다.');
+      } finally { writable.close(); }
+    }
+    const summary = source.databaseSchemaVersion === readMigrationFiles(migrations).length ? source : inspectDatabase(databaseFile);
+    const stat = fs.statSync(databaseFile);
+    const installFiles = manifest.files.map(item => item.relativePath === DB_ENTRY
+      ? { relativePath: DB_ENTRY, size: stat.size, sha256: sha256(fs.readFileSync(databaseFile)) }
+      : item);
+    return { manifest, summary, sourceSchemaVersion: source.databaseSchemaVersion, installFiles };
   } catch (error) {
     if (error instanceof RepositoryError) throw error;
     fail('BACKUP_INVALID', '백업 파일을 검증하지 못했습니다. ZIP과 Manifest를 확인해 주세요.');
@@ -133,7 +164,7 @@ function assertManagedFiles(root, episodes) {
   if (missing.length || unexpected.length) fail('BACKUP_FILES_MISSING', '백업 범위를 확인해 주세요. 누락 회차 ID: ' + (missing.join(', ') || '없음') + '; 미등록 관리 파일: ' + (unexpected.join(', ') || '없음') + '. 외부 파일은 수집하지 않았습니다.');
 }
 /** 스냅샷과 모든 TXT를 고정한 뒤 검증된 ZIP을 no-clobber 방식으로 게시한다. */
-function exportSnapshot(root, output, applicationVersion, hook = () => {}) {
+function exportSnapshot(root, output, applicationVersion, hook = () => {}, options = {}) {
   assertPlainPath(root, true);
   assertPlainPath(output);
   const relativeOutput = path.relative(root, output);
@@ -162,12 +193,19 @@ function exportSnapshot(root, output, applicationVersion, hook = () => {}) {
       fs.mkdirSync(path.dirname(target), { recursive: true }); fs.copyFileSync(source, target, fs.constants.COPYFILE_EXCL);
       files.push({ relativePath, size: fs.statSync(target).size, sha256: sha256(fs.readFileSync(target)) });
     }
-    const manifest = { formatVersion: FORMAT, createdAt: new Date().toISOString(), applicationVersion, databaseSchemaVersion: summary.databaseSchemaVersion, files };
+    const existingBaseline = baselineStore.readBaseline(root);
+    const syncBaseline = existingBaseline ?? baselineStore.makeBaseline(baselineStore.collect(snapshot, path.join(temporary, 'manuscripts')));
+    const manifest = { formatVersion: FORMAT, createdAt: new Date().toISOString(), applicationVersion, databaseSchemaVersion: summary.databaseSchemaVersion, files, syncBaseline };
     gate.setPhase('ZIP 작성 및 최종 검증 중'); hook('zip');
     writeZip(partial, [{ name: 'manifest.json', data: Buffer.from(JSON.stringify(manifest)) }, ...files.map(item => ({ name: item.relativePath, path: path.join(temporary, ...item.relativePath.split('/')) }))], hook);
     validatePackage(partial, path.join(temporary, 'verify'));
     fs.linkSync(partial, output); // 최종 게시 순간에도 기존 파일을 덮어쓰지 않는다.
     published = true;
+    // 최초 내보내기에서 공유 조상 ID를 기록한다. DB/TXT는 변경하지 않는다.
+    if (!existingBaseline && options.persistBaseline !== false) {
+      try { baselineStore.publishBaseline(root, syncBaseline); }
+      catch (cause) { logIpcError({ channel: 'backup:export', code: 'UPDATE_BASELINE_WRITE_FAILED', message: '백업은 저장했으나 변경사항 업데이트 기준본을 기록하지 못했습니다.', cause }); }
+    }
     return { createdAt: manifest.createdAt, databaseSchemaVersion: summary.databaseSchemaVersion, workCount: summary.workCount, episodeCount: summary.episodeCount };
   } finally {
     try {
@@ -200,7 +238,10 @@ function recoverInterruptedRestore(root) {
   const db = path.join(root, 'novelcompany.db'), works = path.join(root, 'works');
   if (journal.phase === 'COMMITTED') {
     // 성공 표시 이후에도 새 DB/TXT를 검증하지 못하면 보존된 원본으로 되돌린다.
-    try { const summary = inspectDatabase(db); assertManagedFiles(root, summary.episodes); verifyInstalled(root, journal.files); }
+    try {
+      const summary = inspectDatabase(db); assertManagedFiles(root, summary.episodes); verifyInstalled(root, journal.files);
+      if (journal.hadBaseline !== undefined && JSON.stringify(baselineStore.readBaseline(root)) !== JSON.stringify(journal.syncBaseline ?? null)) throw new Error('baseline');
+    }
     catch { journal.phase = 'REPLACING'; }
   }
   if (journal.phase !== 'COMMITTED') {
@@ -217,6 +258,14 @@ function recoverInterruptedRestore(root) {
       assertPlainPath(old); assertPlainPath(target);
       // 교체 시작 전 이동하지 않은 원본 sidecar는 그대로 유지한다.
       if (fs.existsSync(old)) { if (fs.existsSync(target)) fs.unlinkSync(target); fs.renameSync(old, target); }
+    }
+    if (journal.hadBaseline !== undefined) {
+      const target = path.join(root, baselineStore.NAME), old = path.join(operation, 'old-baseline');
+      assertPlainPath(target); assertPlainPath(old);
+      if (fs.existsSync(old) || !journal.hadBaseline) {
+        if (fs.existsSync(target)) fs.unlinkSync(target);
+        if (fs.existsSync(old)) fs.renameSync(old, target);
+      } else if (!fs.existsSync(target)) fail('RESTORE_RECOVERY_FAILED', '기존 공통 기준본을 복구할 수 없습니다.');
     }
   }
   fs.unlinkSync(journalPath);
@@ -245,11 +294,13 @@ function replaceData(root, packageFile, applicationVersion, options = {}) {
     const backupDirectory = path.join(root, 'backups'); assertPlainPath(backupDirectory, true); fs.mkdirSync(backupDirectory, { recursive: true });
     gate.setPhase('현재 데이터 자동 백업 중'); hook('automatic-backup');
     const backupFile = path.join(backupDirectory, 'before-restore-' + id + '.zip');
-    exportSnapshot(root, backupFile, applicationVersion, hook);
+    try { exportSnapshot(root, backupFile, applicationVersion, hook, { persistBaseline: false }); }
+    catch (cause) { throw new RepositoryError('BACKUP_AUTOMATIC_FAILED', '현재 데이터 자동 백업에 실패하여 가져오기를 시작하지 않았습니다.', cause); }
     gate.setPhase('기존 연결 종료 및 전체 데이터 교체 중');
     options.stopWorker?.(); closeDatabase(); closed = true;
     const database = path.join(root, 'novelcompany.db'), works = path.join(root, 'works');
-    const journal = { version: 1, id, phase: 'PREPARED', hadDatabase: fs.existsSync(database), hadWorks: fs.existsSync(works), files: validated.manifest.files };
+    const baselineFile = path.join(root, baselineStore.NAME);
+    const journal = { version: 1, id, phase: 'PREPARED', hadDatabase: fs.existsSync(database), hadWorks: fs.existsSync(works), hadBaseline: fs.existsSync(baselineFile), syncBaseline: validated.manifest.syncBaseline ?? null, files: validated.installFiles };
     writeJournal(root, journal); journalStarted = true;
     journal.phase = 'REPLACING'; writeJournal(root, journal);
     // 닫힌 연결의 DB와 sidecar를 함께 보존하되 ZIP에는 유효 snapshot만 포함한다.
@@ -260,8 +311,10 @@ function replaceData(root, packageFile, applicationVersion, options = {}) {
     }
     if (fs.existsSync(works)) fs.renameSync(works, path.join(operation, 'old-works'));
     hook('old-works');
+    if (journal.hadBaseline) fs.renameSync(baselineFile, path.join(operation, 'old-baseline'));
     fs.renameSync(path.join(prepared, DB_ENTRY), database); hook('new-database');
     const nextWorks = path.join(prepared, 'manuscripts'); fs.mkdirSync(nextWorks, { recursive: true }); fs.renameSync(nextWorks, works); hook('new-works');
+    if (journal.syncBaseline) baselineStore.publishBaseline(root, journal.syncBaseline);
     gate.setPhase('교체한 DB와 원고 최종 검증 중');
     verifyInstalled(root, journal.files);
     const summary = inspectDatabase(database); assertManagedFiles(root, summary.episodes); hook('verified');
@@ -286,7 +339,7 @@ function replaceData(root, packageFile, applicationVersion, options = {}) {
 }
 /** PC 절대 경로나 내부 Episode 행을 제외한 가져오기 요약을 만든다. */
 function publicSummary(validated) {
-  return { createdAt: validated.manifest.createdAt, applicationVersion: validated.manifest.applicationVersion, databaseSchemaVersion: validated.summary.databaseSchemaVersion, workCount: validated.summary.workCount, episodeCount: validated.summary.episodeCount };
+  return { createdAt: validated.manifest.createdAt, applicationVersion: validated.manifest.applicationVersion, sourceSchemaVersion: validated.sourceSchemaVersion, databaseSchemaVersion: validated.summary.databaseSchemaVersion, workCount: validated.summary.workCount, episodeCount: validated.summary.episodeCount };
 }
 /** 활성 ReviewJob과 실제 Worker drain을 확인하여 임의 취소 없이 안전한 상태만 허용한다. */
 function assertQueueIdle(queue) {

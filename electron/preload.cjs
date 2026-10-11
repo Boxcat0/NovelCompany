@@ -140,9 +140,9 @@ function exposeNovelCompanyApi() {
     backup: {
       /** Main 파일 선택 창으로 전체 데이터 내보내기를 요청한다. */
       export: () => ipcRenderer.invoke('backup:export'),
-      /** 파일을 검증하고 교체 전 요약만 요청한다. */
-      preview: () => ipcRenderer.invoke('backup:preview'),
-      /** Main의 최종 확인을 거쳐 검증한 단회 token으로 전체 교체를 요청한다. */
+      /** 선택한 방식에 따라 파일을 검증하고 적용 전 요약만 요청한다. */
+      preview: (mode = 'overwrite') => ipcRenderer.invoke('backup:preview', mode),
+      /** Main의 최종 확인을 거쳐 검증한 단회 token으로 교체 또는 업데이트를 요청한다. */
       import: (token) => ipcRenderer.invoke('backup:import', token),
       /** 사용하지 않는 프리뷰 파일을 정리한다. */
       cancelPreview: () => ipcRenderer.invoke('backup:cancel-preview'),
@@ -210,7 +210,17 @@ function exposeNovelCompanyApi() {
       getEpisodeWorkContext,
       getEpisodeReviewContext,
     },
-    reviews: { start: submitReview, submit: submitReview, getQueue: getReviewQueue, getJobByEpisode: getReviewJobByEpisode, cancelQueued: cancelQueuedReview, getByEpisode: getReviewsByEpisode, getById: getReviewById },
+    reviews: {
+      start: submitReview, submit: submitReview, getQueue: getReviewQueue, getJobByEpisode: getReviewJobByEpisode, cancelQueued: cancelQueuedReview, getByEpisode: getReviewsByEpisode, getById: getReviewById,
+      decisions: {
+        /** Run에 속하는 전체 Finding의 판단을 한 번에 조회한다. */
+        listForRun: (scope) => ipcRenderer.invoke('reviews:decisions:list', scope),
+        /** 선택 Finding의 변경 불가 판단 이력을 조회한다. */
+        history: (scope) => ipcRenderer.invoke('reviews:decisions:history', scope),
+        /** 작가가 선택한 상태·메모와 예상 revision을 Main에 전달한다. */
+        append: (input) => ipcRenderer.invoke('reviews:decisions:append', input),
+      },
+    },
   });
 }
 
