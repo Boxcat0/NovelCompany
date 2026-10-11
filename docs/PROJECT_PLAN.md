@@ -1,5 +1,25 @@
 # NovelCompany 개발 계획
 
+## Task030-HF02 — Local Data Backup & Restore V1
+
+설정 화면에 현재 작품/회차/Schema 요약과 수동 ZIP 내보내기·가져오기를 추가했다. Main 파일 선택, 경로 없는 IPC, 검증 token, 전체 교체 최종 확인, 실제 단계 표시 및 중복 클릭/이동/종료 보호를 적용한다. 기존 sandbox 보안을 유지한다.
+
+백업은 SQLite VACUUM INTO snapshot과 등록된 Episode TXT만 명시적으로 수집하고 Manifest V1/CRC/SHA256을 검증한 뒤 게시한다. 현재 별도 관리 이미지/첨부 저장 기능은 없다. 미등록 파일·누락·unsafe 참조는 목록을 보고하여 중단한다. 소스·로그·캐시·기존 백업·인증·기기 설정은 제외한다. Schema 014만 지원하고 다른 버전은 운영 데이터를 변경하지 않고 거부한다.
+
+가져오기는 양방향 Merge가 아닌 DB/works 전체 교체다. 활성 IPC/dirty/ReviewJob/Worker를 차단하고 자동 현재 ZIP을 만든 뒤 연결을 닫는다. 영속 PREPARED/REPLACING/COMMITTED journal과 원본 사본으로 오류 및 프로세스 중단을 복구한다. 앱 시작은 Worker보다 먼저 복원 상태를 확인한다. 성공하면 앱을 재시작하여 가져온 Job을 기존 Task026 정책으로 처리한다. 과거 이력과 hash는 보존한다.
+
+`test:data-backup`은 임시 DB/Storage/Profile에서 Canon/City/Alias/POV/Findings·WAL snapshot·원고 hash·경합·ZIP 실패/공격·Schema/FK/누락 거부·전체 이전·자동 백업 실패·여섯 교체 단계 rollback/실제 강제 종료·imported RUNNING/QUEUED·sandbox 설정 UI·새 Electron 프로세스 조회를 검증한다. 기존 전체 regression/typecheck/build/work-ui를 유지한다. 기존 migration 수정, 새 의존성, 실제 AI 호출, 실제 사용자 데이터 대상 복원 테스트는 없다.
+
+## Task030-HF01 — City Canon Foundation
+
+기존 Location 아래 City를 추가하여 World 1:N Location 1:N City 계층과 12개 기본 Set을 지원한다. City.location은 필수 단일 지역 참조이고 설명은 선택이다. Generic CRUD/Readiness/Dynamic Form과 동일 공간 참조·Incoming Reference 보호·전체 Canon 삭제/재시작을 재사용한다. Character/Organization의 지역 참조와 Character 최소 조건은 유지한다.
+
+신규 Bootstrap은 명시한 Work/빈 공간에 현재 12/33/4 정의만 설치한다. 기존 11개 정의는 `setup:city-canon`으로 명시한 한 Work/공간에 City만 추가한다. 사전 점검·대상 재확인·백업·transaction·충돌 중단·No-op·rollback을 구현하며 Record를 자동 생성하지 않는다. TASK016_CANON_SETS 원본과 기존 migration을 보존한다. schema는 014이고 추가 migration은 없다.
+
+`test:city-canon`은 격리 DB/Storage에서 정의·신규 설치·기존 업그레이드·충돌·백업 실패·관계·CRUD·삭제·재시작·Review 이력/FIFO/hash 호환을 검증한다. `test:work-ui`는 실제 sandbox 화면의 도시 목록·Readiness 이동·동적 참조·필수 입력·같은 작품 선택지·CRUD·dirty·지연 응답 및 기존 Character UI를 확인한다. Task017~030 회귀 명령도 유지한다.
+
+City 이름/Scene Header 자동 연결, Character 도시 필드, Organization 도시 거점, 지도·추가 공간 계층·AI 지명 추출은 구현하지 않는다. 도시 기반 ReviewContext 확장은 별도 요구와 버전 정책을 정한 뒤 진행한다.
+
 ## Task030 — Rule-based Canon Review V1
 
 RULE_V1과 CHARACTER_SKILL_ATTRIBUTE_MISMATCH_V1 규칙을 추가했다. 실제 Generic Canon의 Character.skills/attributes 및 Skill.required_attribute를 Record ID로 비교하며 완전한 목록과 선택된 Record를 확인할 수 있는 관계만 검사한다. 누락·부분 데이터·Legacy 미설정은 판단을 건너뛰고 중복 관계는 한 번만 보고한다. 결과는 기존 V1 계약의 CANON/WARNING/DETERMINISTIC 근거이며 실제 Skill 사용자나 작품 오류를 확정하지 않는다.

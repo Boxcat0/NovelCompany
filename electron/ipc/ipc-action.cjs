@@ -1,13 +1,14 @@
 const { RepositoryError } = require("../database/repositories/repository-error.cjs");
 const { createErrorResult, createSuccessResult } = require("./ipc-result.cjs");
 const { logIpcError } = require("../logging/logger.cjs");
+const { withDataAccess } = require('../backup/data-operation-gate.cjs');
 
 /**
- * Repository 호출을 Result 객체로 감싸고 내부 오류는 Main Process 로그에만 기록한다.
+ * 일반 IPC의 DB/TXT 접근을 배타 백업 gate와 Result 계약으로 보호한다.
  */
 async function executeIpcAction(channel, action) {
   try {
-    return createSuccessResult(await action());
+    return createSuccessResult(await (channel.startsWith('backup:') ? action() : withDataAccess(action)));
   } catch (error) {
     if (error instanceof RepositoryError) {
       logIpcError({

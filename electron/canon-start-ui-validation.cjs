@@ -79,7 +79,7 @@ async function exerciseCanonStart(reopened = false) {
   await checkDeletion(true);
   await selectConcept("임시 검증 작품");
   check(!button("Canon 시작"), "Existing Canon offered start");
-  check(document.querySelectorAll("nav[aria-label='설정 분류'] button").length === 11, "Existing sets lost");
+  check(document.querySelectorAll("nav[aria-label='설정 분류'] button").length === 12, "Existing sets lost");
   [...document.querySelectorAll("nav[aria-label='설정 분류'] button")].find((item) => item.querySelector("span").textContent === "캐릭터").click();
   await waitFor(() => document.querySelector("h2")?.textContent === "캐릭터" && [...document.querySelectorAll("nav[aria-label='설정 분류'] button")].every((item) => !item.disabled), "character readiness");
   check(button("+ 새 항목").disabled, "Required references lost");

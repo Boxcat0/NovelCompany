@@ -150,7 +150,7 @@ async function runValidation() {
       episodeId: empty.id,
     });
     assert.equal(emptyContext.episode.content, "");
-    assert.equal(emptyContext.canon.summary.setCount, 11);
+    assert.equal(emptyContext.canon.summary.setCount, 12);
     assert.equal(emptyContext.canon.summary.recordCount, 0);
     assert.ok(emptyContext.canon.sets.every((set) => set.records.length === 0));
 

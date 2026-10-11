@@ -86,11 +86,12 @@ async function validateCanonAuthoring(api = repository) {
   console.log("Task022 readiness/minimum/optional/UNIQUE/reference/CRUD validation passed.");
 }
 
-/** 기존 004 DB를 재개방하여 정확한 정의만 보정하고 백업·ID·Record 보존 및 재실행을 검증한다. */
+/** City 이전 11개 Set의 004 DB를 재현해 당시 migration의 보정·백업·보존을 검증한다. */
 function validateAuthoringMigration(root) {
   const file = path.join(root, "task022-migration", "novelcompany.db");
   const db = initializeDatabase(file);
-  const scope = createCanonFixture(); const custom = createCanonFixture();
+  const legacySets = require('./setup/initial-canon-definition.cjs').CANON_SETS.filter(set => set.key !== 'city');
+  const scope = createCanonFixture(legacySets); const custom = createCanonFixture(legacySets);
   const saved = repository.create(scope.world, inputFor(scope.world, "임시 보존 세계"));
   const location = repository.create(scope.location, inputFor(scope.location, "임시 보존 지역", { world: saved.id }));
   const attribute = repository.create(scope.attribute, inputFor(scope.attribute, "임시 보존 속성"));

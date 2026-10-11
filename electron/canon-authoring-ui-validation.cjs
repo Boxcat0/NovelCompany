@@ -1,4 +1,4 @@
-/** 실제 sandbox Renderer에서 기초 입력부터 캐릭터/후행 분류까지 작성 진행과 저장 보호를 검증한다. */
+/** 실제 sandbox Renderer에서 City 포함 작성 흐름·동적 참조·기존 Character·저장 보호를 검증한다. */
 async function exerciseCanonAuthoring(mode = "normal") {
   /** React와 IPC의 목표 상태를 제한 시간 동안 기다린다. */
   async function waitFor(predicate, label) { await new Promise((resolve) => setTimeout(resolve, 40)); const until = Date.now() + 10000; while (!predicate()) { if (Date.now() > until) throw new Error("Authoring UI: " + label); await new Promise((resolve) => setTimeout(resolve, 30)); } }
@@ -31,14 +31,15 @@ async function exerciseCanonAuthoring(mode = "normal") {
   click("컨셉정리");
   const title = "아무래도 전직을 잘못한 것 같습니다?";
   await waitFor(() => button(title), "work list"); click(title);
-  await waitFor(() => document.querySelectorAll("nav[aria-label='설정 분류'] button").length === 11 && !document.querySelector(".back-button").disabled, "definitions");
+  await waitFor(() => document.querySelectorAll("nav[aria-label='설정 분류'] button").length === 12 && !document.querySelector(".back-button").disabled, "definitions");
   const work = (await window.novelCompany.works.getAll()).data.find((item) => item.title === title);
   const space = (await window.novelCompany.canon.spaces.getByWorkId(work.id)).data;
   const sets = (await window.novelCompany.canon.sets.getByCanonSpaceId(space.id)).data;
   let definition;
   check([...document.querySelectorAll(".canon-authoring-group h3")].map((item) => item.textContent).join(",") === "기초 설정,공간 / 집단,인물,인물 확장", "Group order");
+  check([...document.querySelectorAll('.canon-authoring-group')].find(group => group.querySelector('h3').textContent === '공간 / 집단').textContent.indexOf('도시') < [...document.querySelectorAll('.canon-authoring-group')].find(group => group.querySelector('h3').textContent === '공간 / 집단').textContent.indexOf('조직'), 'City display order');
   if (mode === "race") {
-    setButton("세계").click(); setButton("속성").click();
+    setButton("도시").click(); setButton("속성").click();
     await waitFor(() => document.querySelector(".canon-record-list h2")?.textContent === "속성" && !document.querySelector(".back-button").disabled, "latest set");
     await new Promise((resolve) => setTimeout(resolve, 500));
     check(document.querySelector(".canon-record-list h2").textContent === "속성", "Late set response replaced current selection");
@@ -52,13 +53,26 @@ async function exerciseCanonAuthoring(mode = "normal") {
   }
   for (const name of ["세계", "속성", "패시브"]) ready(name, true);
   ready('스킬', false);
-  for (const name of ["지역", "조직", "캐릭터", "권능", "권속", "계약", "관계"]) ready(name, false);
+  for (const name of ["지역", "도시", "조직", "캐릭터", "권능", "권속", "계약", "관계"]) ready(name, false);
+  await select('city'); check(button('+ 새 항목').disabled, 'City without Location blocked');
+  check(document.querySelector('.canon-readiness').textContent.includes('지역'), 'City Location readiness');
+  click('지역 입력으로 이동'); await waitFor(() => document.querySelector('.canon-record-list h2')?.textContent === '지역' && !document.querySelector('.back-button').disabled, 'City dependency navigation');
   await select("character"); check(button("+ 새 항목").disabled, "Blocked character create");
   check(document.querySelector(".canon-readiness").textContent.includes("패시브"), "Missing blocker");
   click("지역 입력으로 이동"); await waitFor(() => document.querySelector(".canon-record-list h2")?.textContent === "지역" && !document.querySelector(".back-button").disabled, "dependency location");
   click("세계 입력으로 이동"); await waitFor(() => document.querySelector(".canon-record-list h2")?.textContent === "세계" && !document.querySelector(".back-button").disabled, "dependency world");
   await select("world"); await newRecord("임시 UI 세계"); await save("임시 UI 세계"); ready("지역", true);
   await select("location"); await newRecord("임시 UI 지역"); await reference("world", "임시 UI 세계"); await save("임시 UI 지역"); ready("조직", true);
+  ready('도시', true);
+  await select('city'); await newRecord('임시 UI 도시');
+  check(definition.recordNameLabel === '도시 이름' && definition.fields.length === 2, 'City dynamic fields');
+  check(document.querySelector("label[for='" + fieldId('location') + "']").textContent.includes('필수'), 'City Location required label');
+  check([...document.getElementById(fieldId('location')).options].filter(option => option.value).map(option => option.textContent).join(',') === '임시 UI 지역', 'Foreign Work Location exposed');
+  click('저장'); await waitFor(() => document.querySelector('[role=alert]')?.textContent.includes('소속 지역'), 'City missing Location rejected');
+  window.confirm = () => false; setButton('캐릭터').click(); check(document.getElementById('canon-record-name').value === '임시 UI 도시', 'City dirty protected'); window.confirm = () => true;
+  await reference('location', '임시 UI 지역'); await fill(fieldId('description'), '임시 도시 설명'); await save('임시 UI 도시');
+  await fill('canon-record-name', '임시 UI 도시 수정'); await fill(fieldId('description'), '수정한 도시 설명'); await save('임시 UI 도시 수정');
+  click('삭제'); await waitFor(() => !button('임시 UI 도시 수정') && !document.getElementById('canon-record-name') && !document.querySelector('.back-button').disabled, 'City generic delete');
   await select("attribute"); await newRecord("임시 UI 속성"); await save("임시 UI 속성"); ready("캐릭터", false);
   ready('스킬', true);
   await select('skill');
@@ -109,7 +123,7 @@ async function exerciseCanonAuthoring(mode = "normal") {
   click('저장'); await waitFor(() => document.querySelector('[role=alert]')?.textContent.includes('필요 속성'), 'Required attribute client validation');
   await reference('required_attribute', '임시 UI 속성'); await save("임시 UI 삭제 스킬"); click("삭제"); await waitFor(() => !button("임시 UI 삭제 스킬") && !document.getElementById("canon-record-name") && !document.querySelector(".back-button").disabled, "unused delete");
   await select("character"); click("이카로스"); await waitFor(() => document.getElementById("canon-record-name")?.value === "이카로스" && button("저장")?.disabled === false, "final form");
-  return { checks: "grouping/dependency progression/minimum/optional/UNIQUE/CRUD/dirty/security" };
+  return { checks: "grouping/City readiness+dynamic reference+scope+CRUD+dirty/Character minimum/optional/UNIQUE/security" };
 }
 
 module.exports = { exerciseCanonAuthoring };

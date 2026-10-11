@@ -179,6 +179,15 @@ export type CreateEpisodeInput = {
 export type UpdateEpisodeInput = CreateEpisodeInput;
 
 export interface NovelCompanyApi {
+  backup: {
+    export(): Promise<IpcResult<BackupSummary | null>>;
+    preview(): Promise<IpcResult<(BackupSummary & { token: string }) | null>>;
+    import(token: string): Promise<IpcResult<(BackupSummary & { automaticBackup: string; restartRequired: boolean }) | null>>;
+    cancelPreview(): Promise<IpcResult<null>>;
+    status(): Promise<IpcResult<{ busy: boolean; phase: string; workCount?: number; episodeCount?: number; databaseSchemaVersion?: number }>>;
+    editorState(dirty: boolean, busy: boolean): void;
+    onProgress(callback: (state: { busy: boolean; phase: string }) => void): () => void;
+  };
   sceneNarration: {
     getForEpisode(input: { workId: string; episodeId: string }): Promise<IpcResult<SceneNarrationSnapshot>>;
     save(input: SaveSceneNarrationInput): Promise<IpcResult<{ sceneIdentity: string; narration: SceneNarration }>>;
@@ -250,6 +259,8 @@ export interface NovelCompanyApi {
     getById(reviewRunId: string): Promise<IpcResult<ReviewRun>>;
   };
 }
+
+export type BackupSummary = { createdAt: string; applicationVersion?: string; databaseSchemaVersion: number; workCount: number; episodeCount: number };
 
 declare global {
   interface Window {

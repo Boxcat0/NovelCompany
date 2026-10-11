@@ -12,11 +12,11 @@ function unwrap<T>(result: IpcResult<T>): T {
   return result.data;
 }
 
-/** 기존 Set key를 입력 안내 그룹으로 배치하며 알려지지 않은 정의도 누락하지 않는다. */
+/** 기존 작성 그룹과 지역→도시→조직 순서를 안내하며 사용자 정의 Set도 누락하지 않는다. */
 function buildCanonAuthoringGroups(sets: CanonSet[]) {
   const groups = [
     { label: "기초 설정", keys: ["world", "attribute", "passive", "skill"] },
-    { label: "공간 / 집단", keys: ["location", "organization"] },
+    { label: "공간 / 집단", keys: ["location", "city", "organization"] },
     { label: "인물", keys: ["character"] },
     { label: "인물 확장", keys: ["authority", "servant", "contract", "relationship"] },
   ];

@@ -6,20 +6,20 @@ const { createWork } = require("./repositories/work-repository.cjs");
 const definitions = require("./repositories/canon-definition-repository.cjs");
 const records = require("./repositories/canon-record-repository.cjs");
 
-/** 호출자가 연 임시 DB에만 템플릿 정의를 만들고 테스트용 scope를 반환한다. */
-function createCanonFixture() {
+/** 임시 DB에 현재 또는 명시한 과거 정의를 설치하여 실제 순서·참조를 가진 scope를 반환한다. */
+function createCanonFixture(definitionSets = CANON_SETS) {
   const db = getDatabase();
   const work = createWork({ title: "임시 검증 작품" });
   const canonSpaceId = randomUUID();
   const now = new Date().toISOString();
   db.prepare("INSERT INTO canon_spaces VALUES (?, ?, ?, ?, ?)").run(canonSpaceId, work.id, "MODERN_FANTASY_V1", now, now);
-  const setIds = Object.fromEntries(CANON_SETS.map((set) => [set.key, randomUUID()]));
-  for (const [index, set] of CANON_SETS.entries()) db.prepare("INSERT INTO canon_sets VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(setIds[set.key], canonSpaceId, set.key, set.name, set.recordNameLabel, null, index, now, now);
-  for (const set of CANON_SETS) {
+  const setIds = Object.fromEntries(definitionSets.map((set) => [set.key, randomUUID()]));
+  for (const [index, set] of definitionSets.entries()) db.prepare("INSERT INTO canon_sets VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(setIds[set.key], canonSpaceId, set.key, set.name, set.recordNameLabel, null, index + 1, now, now);
+  for (const set of definitionSets) {
     for (const [index, field] of set.fields.entries()) {
       const id = randomUUID();
-      db.prepare("INSERT INTO canon_fields VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(id, canonSpaceId, setIds[set.key], field[0], field[1], field[2], field[3], field[5] ? setIds[field[5]] : null, Number(field[4]), null, index, now, now);
-      for (const [position, option] of (field[6] ?? []).entries()) db.prepare("INSERT INTO canon_field_options VALUES (?, ?, ?, ?, ?, ?, ?)").run(randomUUID(), canonSpaceId, setIds[set.key], id, option[0], option[1], position);
+      db.prepare("INSERT INTO canon_fields VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(id, canonSpaceId, setIds[set.key], field[0], field[1], field[2], field[3], field[5] ? setIds[field[5]] : null, Number(field[4]), null, index + 1, now, now);
+      for (const [position, option] of (field[6] ?? []).entries()) db.prepare("INSERT INTO canon_field_options VALUES (?, ?, ?, ?, ?, ?, ?)").run(randomUUID(), canonSpaceId, setIds[set.key], id, option[0], option[1], position + 1);
     }
   }
   return Object.fromEntries(Object.entries(setIds).map(([key, setId]) => [key, { canonSpaceId, setId }]));

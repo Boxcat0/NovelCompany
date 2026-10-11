@@ -16,7 +16,12 @@ const TASK016_CANON_SETS = [
 ];
 
 
-/** Task016 정의를 보존하고 Task017/022에서 합의한 required 정책만 파생한다. */
+const CITY_CANON_SET = { key: 'city', name: '도시', recordNameLabel: '도시 이름', fields: [
+  ['location', '소속 지역', 'REFERENCE_ONE', 'COMBOBOX', true, 'location'],
+  ['description', '설명', 'LONG_TEXT', 'TEXTAREA', false],
+] };
+
+/** Task016 원본과 기존 Set 순서를 보존하고 현재 필수 정책 및 City 정의를 파생한다. */
 function refineInitialCanonSets() {
   return TASK016_CANON_SETS.map(set => ({ ...set, fields: set.fields.map(field => {
     const refined = [...field];
@@ -24,7 +29,7 @@ function refineInitialCanonSets() {
     if (set.key === 'character') refined[4] = ['origin_location', 'attributes', 'passives'].includes(field[0]);
     if (set.key === 'relationship' && field[0] === 'relationship_type') refined[4] = true;
     return refined;
-  }).concat(set.key === 'skill' ? [['required_attribute', '필요 속성', 'REFERENCE_ONE', 'COMBOBOX', true, 'attribute']] : []) }));
+  }).concat(set.key === 'skill' ? [['required_attribute', '필요 속성', 'REFERENCE_ONE', 'COMBOBOX', true, 'attribute']] : []) })).concat(CITY_CANON_SET);
 }
 const CANON_SETS = refineInitialCanonSets();
-module.exports = { TASK016_CANON_SETS, CANON_SETS, INITIAL_WORK_TITLE, INITIAL_TEMPLATE_KEY };
+module.exports = { TASK016_CANON_SETS, CANON_SETS, CITY_CANON_SET, INITIAL_WORK_TITLE, INITIAL_TEMPLATE_KEY };

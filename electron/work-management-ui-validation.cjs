@@ -151,6 +151,7 @@ async function exerciseWorkManagement() {
 }
 
 /** 분리된 DB와 sandbox 창에서 lifecycle·Findings 표시·경합·재시작을 검증한다. */
+/** 임시 DB·Profile의 실제 sandbox에서 City/Canon·Episode·Review UI와 재시작을 검증한다. */
 async function runValidation() {
   let window;
   let exitCode = 0;
@@ -172,6 +173,14 @@ async function runValidation() {
       ? require('./review/testing/mock-review-processor.cjs').createMockReviewProcessor(findingFixtureMode)
       : require('./review/review-processor-selection.cjs').createReviewProcessor(key));
     registerReviewHandlers(ipcMain, episodeStorage, reviewQueue);
+    require('./ipc/backup-handlers.cjs').registerBackupHandlers(ipcMain, {
+      dataRoot: temporaryRoot, applicationVersion: '0.1.0', queue: reviewQueue,
+      dialog: {},
+      /** 기존 회귀 UI는 데이터를 교체하지 않으므로 복원 요청은 실패시킨다. */
+      onRestored() { assert.fail('기존 UI 회귀에서 복원 요청은 허용하지 않습니다.'); },
+      /** 기존 UI 회귀에서 복구 오류는 검증 실패로 보고한다. */
+      onFatal() { assert.fail('기존 UI 회귀에서 복구 오류가 발생했습니다.'); },
+    });
     const { exerciseEpisodes } = require("./episode-ui-validation.cjs");
     const { exerciseCanonAuthoring } = require("./canon-authoring-ui-validation.cjs");
     window = new BrowserWindow({ show: false, width: 1280, height: 900, webPreferences: { preload: path.join(__dirname, "preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false, offscreen: true } });
@@ -284,7 +293,7 @@ async function runValidation() {
     /** 실제 정의 요청 중 세계 응답만 지연시켜 최신 Set 선택 보호를 확인한다. */
     ipcMain.handle(definitionChannel, (_event, id) => require("./ipc/ipc-action.cjs").executeIpcAction(definitionChannel, async () => {
       const definition = definitionRepository.getCanonDefinitionBySetId(id);
-      if (definition?.key === "world") await new Promise((resolve) => setTimeout(resolve, 300));
+      if (['world', 'city'].includes(definition?.key)) await new Promise((resolve) => setTimeout(resolve, 300));
       return definition;
     }));
     const authoringRaceResult = await window.webContents.executeJavaScript("(" + exerciseCanonAuthoring.toString() + ")('race')");

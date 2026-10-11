@@ -137,6 +137,26 @@ function getCanonSetDefinition(setId) {
  */
 function exposeNovelCompanyApi() {
   contextBridge.exposeInMainWorld("novelCompany", {
+    backup: {
+      /** Main 파일 선택 창으로 전체 데이터 내보내기를 요청한다. */
+      export: () => ipcRenderer.invoke('backup:export'),
+      /** 파일을 검증하고 교체 전 요약만 요청한다. */
+      preview: () => ipcRenderer.invoke('backup:preview'),
+      /** Main의 최종 확인을 거쳐 검증한 단회 token으로 전체 교체를 요청한다. */
+      import: (token) => ipcRenderer.invoke('backup:import', token),
+      /** 사용하지 않는 프리뷰 파일을 정리한다. */
+      cancelPreview: () => ipcRenderer.invoke('backup:cancel-preview'),
+      /** 실제 단계와 현재 데이터 요약을 조회한다. */
+      status: () => ipcRenderer.invoke('backup:status'),
+      /** 파일 접근 없이 현재 편집 상태만 Main에 알린다. */
+      editorState: (dirty, busy) => ipcRenderer.send('backup:editor-state', { dirty, busy }),
+      /** Electron event를 노출하지 않고 실제 작업 단계만 구독·해제한다. */
+      onProgress: (callback) => {
+        const listener = (_event, state) => callback({ busy: state.busy, phase: state.phase });
+        ipcRenderer.on('backup:progress', listener);
+        return () => ipcRenderer.removeListener('backup:progress', listener);
+      },
+    },
     sceneNarration: {
       /** 저장된 장면 목록과 지정 시점을 요청한다. */
       getForEpisode: (input) => ipcRenderer.invoke('scene-narration:get-for-episode', input),

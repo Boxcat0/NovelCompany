@@ -22,13 +22,17 @@ function App() {
   const [activeItem, setActiveItem] = useState<NavigationItem>("company");
   const ActiveScreen = screens[activeItem];
   const editorNavigation = useRef({ dirty: false, busy: false });
-  /** 현재 작품/Canon/회차 화면의 편집 상태를 기존 이동 확인에 사용할 수 있도록 보관한다. */
-  const handleEditorNavigationState = useCallback((dirty: boolean, busy: boolean) => { editorNavigation.current = { dirty, busy }; }, []);
-  /** 편집 화면 이탈 전에 미저장 입력 폐기를 확인하며 저장 중에는 이동을 막는다. */
+  /** 편집 상태를 이동 보호와 Main 백업 검사에 알리고 설정의 작업 상태는 이동 보호에 사용한다. */
+  const handleEditorNavigationState = useCallback((dirty: boolean, busy: boolean) => {
+    editorNavigation.current = { dirty, busy };
+    window.novelCompany.backup.editorState(dirty, activeItem === 'settings' ? false : busy);
+  }, [activeItem]);
+  /** 편집 폐기를 확인하고 백업·복원 및 저장 중 화면 이동을 막는다. */
   function handleNavigate(item: NavigationItem) {
     if (item === activeItem) return;
-    if ((activeItem === "concept" || activeItem === "workManagement" || activeItem === "works") && (editorNavigation.current.busy || (editorNavigation.current.dirty && !window.confirm("저장하지 않은 변경사항이 있습니다.\n변경 내용을 버리고 이동하시겠습니까?")))) return;
+    if (editorNavigation.current.busy || (editorNavigation.current.dirty && !window.confirm("저장하지 않은 변경사항이 있습니다.\n변경 내용을 버리고 이동하시겠습니까?"))) return;
     editorNavigation.current = { dirty: false, busy: false };
+    window.novelCompany.backup.editorState(false, false);
     setActiveItem(item);
   }
 
@@ -41,7 +45,7 @@ function App() {
           {activeItem === "concept" ? <ConceptScreen onNavigationState={handleEditorNavigationState} />
             : activeItem === "workManagement" ? <WorkManagementScreen onNavigationState={handleEditorNavigationState} />
               : activeItem === "works" ? <WorksScreen onNavigationState={handleEditorNavigationState} />
-              : <ActiveScreen />}
+              : activeItem === 'settings' ? <SettingsScreen onNavigationState={handleEditorNavigationState} /> : <ActiveScreen />}
         </main>
       </div>
     </div>

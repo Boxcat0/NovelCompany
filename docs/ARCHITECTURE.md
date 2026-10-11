@@ -1,5 +1,31 @@
 # NovelCompany 아키텍처
 
+## Task030-HF02 — 수동 로컬 ZIP 백업과 전체 복원
+
+설정의 데이터 내보내기/가져오기는 Main 파일 선택 창과 `backup:export/preview/import/status/cancel-preview`, 편집 상태 알림 및 실제 단계 이벤트를 사용한다. Renderer는 경로 대신 Main이 검증한 창별 token만 전달한다. 가져오기 요약 이후 별도 native 최종 확인을 받고, 자동 백업이 성공한 뒤 전체 교체한다. sandbox/contextIsolation을 유지하며 Node와 파일시스템을 Renderer에 노출하지 않는다.
+
+실제 영속 범위는 `getDataRoot()`(환경변수 `NOVEL_COMPANY_DATA_DIR`, 기본 `C:\NovelCompanyData`)의 SQLite 전체 및 episodes.storage_key에 등록된 `works/<Work ID>/episodes/<번호>.txt`다. 이미지/첨부 자산 저장 기능은 현재 없으므로 추측한 assets 폴더를 수집하지 않는다. 소스·빌드·node_modules·로그·캐시·기존 백업·Electron profile·인증·기기 설정·외부/미등록 원고는 제외한다. 누락·외부 참조·링크 및 works 안의 미등록 파일은 목록을 보고하고 중단하여 교체로 조용히 삭제하지 않는다. 현재 사용하지 않는 app_settings에 인증/기기 전용 키가 발견되면 V1은 패키지 생성을 거부한다.
+
+일반 IPC의 전체 비동기 읽기/쓰기 수명을 Main data gate가 추적한다. 진행 중 요청·미저장 편집·QUEUED/RUNNING·실제 Worker drain이 있으면 백업/복원을 거부한다. 앱은 단일 인스턴스로 Main 간 잠금 우회를 막고 native dialog 중에도 창 이동·닫기·종료를 보호한다. 배타 구간에서 VACUUM INTO로 독립 DB snapshot을 만들며 WAL/SHM은 ZIP에 넣지 않는다. 원본 TXT bytes를 복사하고 DB content_hash와 대조한다. ZIP 검증 후 hard link no-clobber로 게시한다. 기존 목적 파일은 다른 이름을 요구하며 덮어쓰지 않는다.
+
+복원은 ZIP 헤더 전체 경로/크기/type 검사 → Manifest/CRC/SHA256 → 격리 추출 → 읽기 전용 SQLite integrity/FK/정확한 앱 Schema/migration/TXT 대조 → 요약 → 최종 확인 → 현재 데이터 자동 ZIP(`backups/before-restore-<UUID>.zip`) → Worker 정지/DB close → DB와 works 폴더 rename 교체 → 설치 파일 해시/DB 재검증 → COMMITTED journal → 앱 재시작 순서다. DB 테이블별 병합은 하지 않는다. backups·profile·기기 설정·외부 파일을 유지하고 이전 works를 통째로 교체하므로 오래된 원고가 남지 않는다.
+
+`.restore-journal.json`은 PREPARED/REPLACING/COMMITTED와 operation ID·원본 존재 여부·새 Manifest 파일 목록을 fsync/원자 rename으로 영속 기록한다. DB 및 sidecar와 works 원본은 `.restore-<UUID>/old-*`에 보존한다. 각 rename의 실제 결과로 rollback을 재실행할 수 있다. 앱 시작은 DB/Storage/Worker 초기화 전에 journal을 확인하여 미완료 교체를 원본으로 되돌리고, COMMITTED는 새 파일을 재검증한 뒤 정리한다. 검증/복구 불능이면 원본과 자동 백업을 보존하고 앱 시작을 중단한다. 일반 오류 rollback 후에는 원본 DB와 Worker를 재연결한다. 성공 후에는 gate를 계속 유지하고 새 프로세스만 Repository/Worker를 시작한다. 이 복구는 전체 데이터 가져오기에 대한 것이며 기존 개별 Episode 저장의 crash 정책을 변경하지 않는다.
+
+V1은 현재 001~014 migration과 정확한 앱 SQL Schema만 허용한다. 구/신 Schema를 live DB에서 migration하거나 자동 보정하지 않는다. 이전 Schema 지원은 별도 포맷/격리 migration 정책이 필요하다. 가져온 RUNNING은 기존 Task026의 REVIEW_INTERRUPTED, QUEUED는 기존 입력 재검증/FIFO/RESUBMIT_REQUIRED 정책을 그대로 따른다. 기존 Run/Finding/Canon/Scene/Alias fingerprint는 재작성하지 않는다. 실시간 동기화·예약 백업·양방향 Merge·AI 호출은 없다.
+
+## Task030-HF01 — City Canon Foundation
+
+기본 Generic Canon은 기존 11개 Set에 `city`를 추가한 12개 Set/33개 Field/4개 Option이다. Task016 원본 `TASK016_CANON_SETS`의 11/30/4와 기존 Set 순서를 보존하며 현재 `CANON_SETS`에 City만 뒤에 추가한다. 화면은 기존 작성 그룹에서 지역 → 도시 → 조직 순서로 안내한다. `World 1:N Location 1:N City`이며 City.location은 같은 공간의 Location을 가리키는 필수 REFERENCE_ONE/COMBOBOX다. City의 상위 세계는 Location.world로 조회하고 별도 world/name 필드를 추가하지 않는다. 기존 Character와 Organization의 지역 참조는 유지한다.
+
+Canon 시작은 계속 빈 CanonSpace만 생성한다. 신규 작품의 명시적 설치는 `npm run setup:work-canon -- --work <Work ID> --canon-space <CanonSpace ID>`로 기존 installer를 재사용한다. 지정 작품과 공간·빈 상태를 확인하고 백업 후 Task016 원본 및 현재 필수 정책·스킬 속성·City를 한 transaction으로 설치한다. Record는 0개다. 기존 `setup:current-work-canon -- --canon-space <ID>` 호출의 현재 작품 제한도 유지한다. Bootstrap에서 migration 008을 전 공간에 재실행하지 않고 대상 공간의 스킬 필드만 추가한다.
+
+기존 정의는 `npm run setup:city-canon -- --work <Work ID> --canon-space <CanonSpace ID>`로 한 공간만 확장한다. 최신 schema 014에서 Work/공간 일치, Location의 필수 World 참조, 기존 City 호환성을 읽기 전용으로 점검한다. 대상 재확인 → `backups/before-city-canon-upgrade-<UUID>.db` 백업 → BEGIN IMMEDIATE → 대상 재확인 → City Set/두 Field 추가 및 검증 → COMMIT이다. 백업 실패 시 쓰지 않고 삽입 실패 시 rollback한다. 정확히 호환되는 기존 City는 No-op이며 다르거나 추가 Field가 있으면 덮어쓰지 않고 충돌로 중단한다. 빈 공간에는 Bootstrap을 안내하고 공간 없는 작품에는 공간을 만들지 않는다. 기존 사용자 정의 Field·Record·Reference·ID·순서·시각을 변경하지 않는다.
+
+CRUD/Reference options/Readiness/DynamicCanonForm은 기존 공통 경로를 사용한다. City의 생성 전제는 현재 공간의 Location 1개이고 Character의 최소 조건에는 City를 추가하지 않는다. 같은 도시 이름은 공통 정책대로 허용한다. 참조 중인 Location/City 단독 삭제는 기존 CANON_RECORD_IN_USE로 차단하며 전체 Canon 삭제는 기존 자식→부모 transaction으로 City도 제거하고 재시작한다. 전용 City 테이블·Repository·IPC·migration 015는 없다.
+
+FULL_CANON에는 City 정의와 Record가 포함되므로 실제 전체 입력 변경은 기존 전체 해시를 바꾼다. Relevant selector의 기존 11개 대상과 모든 fingerprint 함수·버전은 변경하지 않는다. City 이름이나 도시 Scene 표제를 새로 해석하지 않아 무관한 V1/V2/V3 Relevant 검토의 현재성은 유지된다. RUNNING의 고정 입력 및 기존 Run/Finding/hash를 보존하며 QUEUED의 기존 재검증·RESUBMIT_REQUIRED 정책도 유지한다. 도시 기반 Scene/Character 검토는 별도 후속 작업이다.
+
 ## Task030 — 등록 Canon 관계의 결정적 규칙 검토
 
 기존 제출 경로는 `WorksScreen → reviews.submit/start → Review Queue → ReviewJob → ReviewRun → Processor → V1 결과 검증 → 원자 완료`다. Main의 `validateProcessorSelection`은 STUB_V1/RULE_V1만 허용하며 생략하면 STUB_V1이다. Renderer는 명시적 선택만 전달한다. 제출 시 선택을 비동기 읽기 전에 고정하고 Job에 저장하며 Worker는 해당 키로 생성한 Processor를 실행한다. 테스트 Main factory 주입은 유지하지만 IPC에서 Mock/임의 Processor는 거부한다.

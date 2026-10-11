@@ -19,13 +19,17 @@
     "build": "npm run typecheck && vite build",
     "package": "npm run build && electron-builder --win",
     "setup:current-work-canon": "node electron/database/setup/install-current-work-canon.cjs",
+    "setup:work-canon": "node electron/database/setup/install-current-work-canon.cjs",
+    "setup:city-canon": "node electron/database/setup/upgrade-city-canon-definition.cjs",
     "test:review-context": "node electron/context/review-context-validation.cjs",
     "test:skill-attribute": "node electron/database/skill-attribute-validation.cjs",
     "test:canon-alias": "node electron/database/canon-alias-validation.cjs",
     "test:scene-narration": "node electron/context/scene-narration-validation.cjs",
     "test:review-queue": "node electron/review/review-queue-validation.cjs",
     "test:review-findings": "node electron/review/review-findings-validation.cjs",
-    "test:rule-review": "node electron/review/rule-review-validation.cjs"
+    "test:rule-review": "node electron/review/rule-review-validation.cjs",
+    "test:city-canon": "node electron/database/city-canon-validation.cjs",
+    "test:data-backup": "node electron/backup/data-backup-validation.cjs"
   },
   "build": {
     "appId": "com.novelcompany.app",

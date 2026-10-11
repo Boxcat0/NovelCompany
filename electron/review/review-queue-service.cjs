@@ -113,7 +113,16 @@ function createReviewQueue(episodeStorage, processorFactory = createReviewProces
   /** 테스트와 앱 종료에서 새 작업 선점을 멈추되 실행 중 입력은 교체하지 않는다. */
   function stop() { stopped = true; if (activeWorker === api) activeWorker = null; }
 
-  const api = { start, stop, submit, cancelQueued, getQueue: jobs.getQueue, getLatestByEpisode: jobs.getLatestByEpisode, kick };
+  /** DB 교체 전에 비동기 Worker가 실제로 끝났는지 확인한다. */
+  function isIdle() { return !draining; }
+
+  /** 실패 복구로 DB를 다시 연 뒤 기존 중단 복구 정책으로 Worker를 재시작한다. */
+  function restart() {
+    if (draining) throw new RepositoryError('REVIEW_WORKER_ALREADY_ACTIVE', '검토 실행기가 아직 종료되지 않았습니다.');
+    stop(); started = false; start();
+  }
+
+  const api = { start, stop, restart, isIdle, submit, cancelQueued, getQueue: jobs.getQueue, getLatestByEpisode: jobs.getLatestByEpisode, kick };
   return api;
 }
 

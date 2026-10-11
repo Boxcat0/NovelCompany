@@ -1,5 +1,24 @@
 # NovelCompany 아키텍처 결정 기록
 
+## Task030-HF02 — 전체 snapshot을 검증한 후 승인된 수동 교체만 수행한다
+
+- 백업 단위는 Work 하나가 아닌 전체 SQLite + 등록 원고이며 ZIP 한 개로 다른 Windows 데이터 root에 이전한다. TXT를 변환하거나 Canon을 자동 수정하지 않는다. 앱 관리 자산 저장소가 없는 현재 버전에서 임의 폴더 수집을 추가하지 않는다.
+- 안전한 SQLite VACUUM INTO와 배타 Main IPC gate를 사용한다. 활성 검토·진행 중 작업·미저장 입력을 취소하지 않고 작업 종료/저장을 요구한다. 단일 인스턴스와 닫기 보호로 앱 자체의 동시 쓰기를 막는다.
+- ZIP32/Manifest V1의 명시적 allowlist·크기/파일수/압축비 제한·CRC/SHA256·SQLite Schema/integrity/FK·Episode TXT 대조를 모두 통과해야 한다. 인증/기기 설정을 DB에 도입하기 전까지 민감 app_settings가 있는 패키지는 거부한다. 기존 목적 백업을 덮어쓰지 않는다.
+- 미등록 works 파일은 임의 포함/삭제하지 않고 목록을 보고하여 중단한다. V1은 Schema 014만 지원한다. 이전 migration은 복원 지원을 별도 설계하기 전까지 거부하며 최신 Schema도 거부한다.
+- 파일 선택은 승인으로 취급하지 않는다. 검증 요약과 전체 교체 경고 뒤 native 최종 확인이 필요하다. 현재 자동 ZIP 생성 실패 시 기존 데이터는 바꾸지 않는다. DB와 works 전체만 교체하며 로컬 인증/기기 설정·backups·외부 파일은 유지한다.
+- fsync된 journal과 rename 전후 원본 사본으로 일반 오류 rollback 및 실제 프로세스 강제 종료 후 시작 복구를 제공한다. COMMITTED도 startup에서 파일/DB를 확인한 뒤 정리한다. 복구 불능이면 원본 파일/백업을 보존하고 fail closed한다. 개별 Episode 저장의 원자성 범위를 확대해 주장하지 않는다.
+- 성공 후 새 Main/DB/Worker 프로세스로 재시작한다. 가져온 RUNNING/QUEUED는 기존 Task026 복구·입력 재검증 정책을 따른다. 이력/fingerprint 버전을 바꾸지 않는다. Merge·동기화·예약 백업·AI 연동은 이번 범위가 아니다.
+
+## Task030-HF01 — City는 기존 Location 아래의 Generic Canon이다
+
+- `location`은 계속 지역이며 region Set을 만들지 않는다. `World 1:N Location 1:N City`를 추가하고 City.location만 필수 단일 지역 참조로 둔다. 상위 세계는 Location.world를 따라 ID로 확인하며 문자열 추측이나 세계 중복 저장을 하지 않는다.
+- City의 두 Field와 대표 이름은 공통 Definition/Record 구조를 사용한다. 신규 테이블·Repository·CRUD 화면·migration은 불필요하다. Character/Organization의 기존 지역 참조와 Character 생성 최소 조건을 유지한다. 이름 중복에 새로운 전역 제약을 도입하지 않는다.
+- Task016 원본과 기존 Set ID/순서를 보존하고 현재 정의에 City를 뒤에 추가한다. Canon 시작과 Definition 설치는 분리한다. 신규 Bootstrap은 명시한 Work/공간의 빈 상태를 확인하며 기존 현재 작품 전용 호출도 유지한다.
+- 기존 정의 확장은 Work/공간을 명시한 한 대상에서만 수행한다. 부모 정의·기존 City 호환성을 확인하고 백업 후 transaction 안에서 다시 확인한다. 호환 City는 No-op, 충돌은 중단, 부분 실패는 rollback한다. 사용자 정의를 초기화하지 않으며 운영 자동 일괄 적용과 실제 Record 생성은 하지 않는다.
+- Incoming Reference는 Location과 City의 단독 삭제를 보호한다. 전체 Canon 삭제는 기존 transaction과 FK 순서를 사용해 City도 삭제하며 빈 공간 재시작을 허용한다.
+- 기존 fingerprint 알고리즘과 selector는 유지한다. FULL의 실제 입력 변경은 stale일 수 있으나 City와 무관한 Relevant/RULE 검토 범위는 확장하지 않는다. 과거 해시와 Findings를 다시 쓰지 않는다. 도시 기반 Scene 연결·인물 위치 추론·AI 지명 추출은 후속 작업이다.
+
 ## Task030 — 규칙 검토는 등록 관계를 비교하고 판단 범위를 제한한다
 
 - RULE_V1의 첫 규칙은 CHARACTER_SKILL_ATTRIBUTE_MISMATCH_V1, 규칙 버전 V1이다. 현재 Relevant Canon의 Character.skills와 전체 Character.attributes를 Skill.required_attribute ID와 비교한다. 같은 이름을 같은 Record로 취급하지 않으며 전체 Work나 재귀 관계로 범위를 확장하지 않는다.

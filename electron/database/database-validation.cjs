@@ -199,13 +199,14 @@ async function runValidation() {
   }
 }
 
-/** 실제 003 파일에 004를 적용해 백업 선행, ID/데이터 보존 및 재시작 안전성을 확인한다. */
+/** City 이전 003 정의에 기존 migration을 적용해 백업·ID·데이터 보존을 검증한다. */
 function validateTask017Migration(temporaryRoot) {
   const { createCanonFixture, inputFor } = require("./canon-record-validation.cjs");
   const records = require("./repositories/canon-record-repository.cjs");
   const databasePath = path.join(temporaryRoot, "migration-task017.db");
   const connection = initializeDatabase(databasePath);
-  const scopes = createCanonFixture();
+  const legacySets = require('./setup/initial-canon-definition.cjs').CANON_SETS.filter(set => set.key !== 'city');
+  const scopes = createCanonFixture(legacySets);
   const saved = records.create(scopes.world, inputFor(scopes.world, "보존 검증", { description: "기존 입력 보존" }));
   connection.prepare("DELETE FROM canon_fields WHERE canon_set_id = ? AND key = 'required_attribute'").run(scopes.skill.setId);
   connection.exec("UPDATE canon_fields SET required = 0 WHERE key IN ('origin_world', 'origin_location', 'current_location', 'attributes', 'passives', 'location')");
@@ -216,8 +217,7 @@ function validateTask017Migration(temporaryRoot) {
   assert.deepEqual(migrated.prepare("SELECT id, canon_set_id, key, value_type FROM canon_fields WHERE key != 'required_attribute' ORDER BY id").all(), beforeFields);
   assert.deepEqual(records.getById(scopes.world, saved.id), saved);
   assert.equal(migrated.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 14);
-  const { CANON_SETS } = require("./setup/setup-initial-novel-canon.cjs");
-  for (const set of CANON_SETS) {
+  for (const set of legacySets) {
     for (const field of set.fields) assert.equal(migrated.prepare("SELECT required FROM canon_fields WHERE canon_set_id = ? AND key = ?").get(scopes[set.key].setId, field[0]).required, Number(field[4]));
   }
   const backupDirectory = path.join(temporaryRoot, "backups");

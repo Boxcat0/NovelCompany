@@ -1,5 +1,40 @@
 # NovelCompany 데이터 모델 설계
 
+## Task030-HF02 — Backup Package V1
+
+새 DB migration이나 테이블을 추가하지 않는다. 패키지는 SQLite의 모든 영속 행(기존 Legacy 포함)과 등록된 Episode TXT 원본을 그대로 보관한다. logical storage_key는 변경하지 않고 가져올 PC의 데이터 root/works에 상대 경로를 연결한다. 현재 앱 관리 자산은 회차 TXT뿐이다.
+
+```text
+manifest.json
+database/novelcompany.db
+manuscripts/<Work ID>/episodes/<번호>.txt
+```
+
+Manifest는 `formatVersion="NOVELCOMPANY_BACKUP_V1"`, `createdAt`(ISO), `applicationVersion`, `databaseSchemaVersion`, `files[{relativePath,size,sha256}]`다. files는 Manifest 자신을 제외한 정확한 파일 집합이다. 절대 PC 경로를 넣지 않는다. 작품/회차 수는 Manifest의 주장 대신 검증한 DB에서 계산한다. DB는 VACUUM INTO 결과이고 -wal/-shm/-journal 및 과거 DB/ZIP 백업은 포함하지 않는다. content_hash가 있는 Episode는 패키지 TXT SHA256과도 일치해야 한다.
+
+새 의존성 없이 ZIP32 STORE(무압축 ZIP)로 순차 내보내고 STORE/DEFLATE 입력만 허용한다. UTF8 flag, 중앙/로컬 헤더 일치·연속 offset·CRC·파일 types를 확인한다. ZIP64·암호화·extra/comment·디렉터리 entry·링크·알 수 없는 경로는 V1에서 거부한다. 대소문자를 무시한 중복 경로, Windows 예약명/불법문자 및 traversal을 거부한다. 상한은 10,000개 entry(Manifest 포함), 파일당 128 MiB, Manifest 2 MiB, 전체 해제 512 MiB, ZIP 520 MiB, 압축비 100배다. 상한을 넘는 백업은 성공으로 게시하지 않는다.
+
+Schema 014 및 migration 001~014 이름/순서와 배포 SQL Schema를 정확히 대조한다. 사용자 Canon Definition은 SQL Schema가 아닌 행이므로 그대로 보존한다. SQLite integrity_check/foreign_key_check를 수행하며 인증/기기 전용 app_settings key는 별도 이전 정책이 없는 V1에서 거부한다. 기존 다른 Schema는 운영 DB에 migration하지 않고 안전하게 거부한다.
+
+복원은 novelcompany.db(연결 종료 후 남은 sidecar 포함)와 works 폴더 전체만 교체한다. 로그·백업·profile·루트의 기기 설정·앱 파일·외부 파일은 유지한다. 교체 전 검증된 현재 ZIP을 보관하며 파일 journal은 기존 원본 DB/works와 새 파일 SHA256을 추적한다. 원본/새 DB를 함께 부분 병합하지 않는다. 가져온 ReviewJob은 재시작 시 기존 중단 복구와 FIFO 정책을 적용하고 과거 완료 Run/Finding/hash는 그대로 둔다.
+
+## Task030-HF01 — City와 지역 계층
+
+City는 기존 Generic `canon_sets`/`canon_fields`/`canon_records`/값·참조 테이블을 사용한다. 신규 DB 테이블과 migration은 없으며 schema 최신 버전은 014다. 현재 기본 Definition은 12 Set/33 Field/4 Option이고 Task016 원본 11/30/4는 보존한다. City는 기존 Set 뒤에 추가하므로 기존 순서와 identity를 바꾸지 않는다.
+
+| 정의 | 값 |
+|---|---|
+| Set key/name/record_name_label | city / 도시 / 도시 이름 |
+| 대표 이름 | canon_records.display_name |
+| location | 소속 지역 / REFERENCE_ONE / COMBOBOX / required=true / reference_set_id=동일 공간 location Set |
+| description | 설명 / LONG_TEXT / TEXTAREA / required=false |
+
+`World 1:N Location 1:N City`다. City.location은 `canon_record_references`의 한 행으로 Location ID를 저장하며 World는 Location.world를 따라 조회한다. City에 world/name 필드, Character.origin_city/current_city, Organization.city는 추가하지 않는다. 기존 지역 참조는 유지한다. 공통 required/타입/Set/공간 검사, composite FK 및 canon_reference_one_limit trigger를 재사용한다. 같은 Location을 여러 City가 참조할 수 있고 도시 이름에 새 UNIQUE를 두지 않는다.
+
+기존 공간의 명시적 확장은 Work ID와 CanonSpace ID를 함께 요구하고 Location.world 정의와 City 두 Field의 정확한 호환성을 검증한다. City가 없을 때만 백업 후 같은 transaction에서 추가한다. 기존 ID·사용자 Field·Record·Reference는 보존하며 이미 호환되면 No-op, 충돌이면 중단한다. 전체 재설치나 자동 일괄 적용은 없다. 단독 삭제의 Incoming Reference 보호와 전체 Canon 삭제·재시작은 기존 정책을 따른다.
+
+FULL_CANON 직렬화에는 새 정의와 실제 City가 포함되고 과거 전체 해시는 재작성하지 않는다. Relevant V1/V2/V3와 RULE_V1 입력에 City를 무조건 추가하지 않는다. 도시 Scene 자동 연결은 구현하지 않는다. 저장된 ReviewRun/Job/Finding 근거와 실행 입력은 유지한다.
+
 ## Task030 — Job Processor 선택과 Rule 근거
 
 Migration `014_add_review_job_processor.sql`은 `review_jobs.processor_key TEXT NOT NULL DEFAULT 'STUB_V1'`을 추가한다. CHECK는 STUB_V1/RULE_V1만 허용하고 `review_job_processor_immutable` trigger는 제출 후 키 변경을 거부한다. 기존 Job은 STUB_V1로 해석하며 기존 Run.processor_key·Finding·source hash는 그대로 보존한다. 013 DB는 `backups/before-task030-<UUID>.db`에 VACUUM INTO 백업한 뒤 적용하며 백업 실패 시 migration도 중단한다. 기존 migration은 수정하지 않는다.
