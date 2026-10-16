@@ -1,5 +1,17 @@
 # NovelCompany 개발 계획
 
+## Task031-EXT01 — Canon Staging & Import V1
+
+Phase A: Schema 016, 전용 Import/후보 Repository, 제한된 JSON parser, Main 파일 선택과 Preview/승인 Import, 원본/수정본/revision, 목록·분류/상태/이름 필터·동적 수정 UI를 구현한다. 공식 Canon을 변경하지 않는 것을 격리 검증한다.
+
+Phase B: 실제 Definition/Repository를 이용한 메모리 Preview, 논리 참조 의존성/UUID 매핑, 명시적 최종 승인, savepoint를 이용한 원자 배치 등록과 연결 이력을 구현한다. 비공개·미확정·잘못된 참조·동명 충돌·검토 잠금은 기존 규칙에 맞춰 차단한다. 기존 Record 갱신/자동 alias/자동 설정 확정은 하지 않는다.
+
+Phase C: 016 전체 ZIP 및 015→016 격리 Migration, 새 프로세스의 수정/승인 UUID 조회, 기존 rollback/recovery, HF03-B Staging 명시적 지원 제한, 실제 sandbox Electron UI와 StrictMode 및 전체 회귀를 검증한다. 신규 명령은 test:canon-staging, test:canon-import, test:canon-promotion이다. 기존 Task031 변경과 Migration 001~015는 보존한다.
+
+실제 `NovelCompany_작가검토_Canon_12종_5차_최종검토.json`은 미제공으로 NOT VERIFIED다. 12개 Set/168개/비공개8개의 가상 Fixture로 기반을 검증하며 실제 원본의 개수·내용·보류 질문은 사용자가 향후 파일 선택 Preview에서 확인한다. 운영 DB/TXT 접근이나 168개 자동 입력은 개발 완료에 포함하지 않는다. 보류된 실제 PC 간 ZIP 문제와 Task032/033 구현은 별도 범위다.
+
+구현 및 격리 검증 상태는 COMPLETE다. 신규 테스트 3개와 기존 필수 회귀 16개, 추가 Skill/Attribute 검증, typecheck/build/diff check가 통과했다. 실제 sandbox Electron에서 Preview 취소/승인 Import, 임시 수정/revision 충돌/미저장 보호, 비공개 차단, 승인 배치 13개 생성과 공식 Canon 이동을 검증했다. 개발 StrictMode와 일반 배포 빌드 모두 통과했다. 실제 원본 파일에 대한 NOT VERIFIED 상태는 유지한다.
+
 ## Task031 — Review Finding Resolution & Author Decisions
 
 기존 ReviewResultViewer에 작가 판단 상태·메모·이력·필터를 통합한다. 가상 UNREVIEWED와 네 가지 저장 상태, append-only 이벤트, Finding별 revision, 동시 저장 충돌, 같은 값 no-op을 구현한다. 기존 Review 원본, Legacy/STUB/RULE_V1, Queue, Freshness를 유지하고 재검토 결과에 판단을 자동 승계하지 않는다.
@@ -7,6 +19,10 @@
 Schema 015와 적용 전 백업, 014 ZIP의 격리 Migration, 015 판단 이력 전체 복원, HF03-B의 로컬 판단 보존/원격 판단 제외를 검증한다. 기존 City CLI의 최신 Schema 확인도 015에 맞춘다. 실제 PC 간 ZIP 가져오기 문제는 보류 상태를 유지한다.
 
 `test:review-decisions`는 격리 DB/Storage/Profile에서 원본 불변·네 상태·이력·동시 저장·scope·rollback·lifecycle·현재성·재검토·Migration/ZIP/업데이트와 실제 Electron Preload/IPC/UI의 저장·필터·dirty·지연 응답을 검사한다. 기존 전체 회귀 명령과 typecheck/build도 실행한다. Production DB/TXT는 테스트에 사용하지 않는다.
+
+Continuation은 기존 구현을 보존하여 검증을 보강한다. 개발 모드 StrictMode에서 판단 폼이 무한 로딩되는 pending 정리 누락을 수정했다. 014 ZIP의 DB/TXT 실제 전체 복원·Review 원본 보존·Migration 전 백업 내용, 015 복원/업데이트 후 새 프로세스의 이력 조회, 실제 저장 응답 지연 중 이동 보호와 두 Preload의 판단 channel 계약을 검증한다. 기존 Migration 001~015는 변경하지 않는다.
+
+Task031 상태는 COMPLETE다. Continuation에서 필수 테스트 16개와 typecheck/build/diff check를 통과했다. 판단 UI는 개발 모드 StrictMode와 일반 배포 빌드에서 모두 통과했으며, 운영 데이터는 읽거나 수정하지 않았다. 실제 두 PC 간 ZIP 가져오기 수동 검증은 기존 보류 범위로 남긴다.
 
 Task032 준비 범위는 검증된 판단 데이터와 조회 계약까지다. 편집부 자동 작업 생성, AI, TXT/Canon 수정, 자동 Diff, 판단 승계/병합은 구현하지 않는다.
 

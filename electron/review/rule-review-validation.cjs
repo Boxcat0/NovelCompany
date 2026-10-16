@@ -221,7 +221,7 @@ async function validateMigration(root, storage, fixture) {
   const db = getDatabase(); const source = await sourceFor(storage, fixture);
   const legacy = runs.createRun({ workId: fixture.workId, episodeId: fixture.episodes[0].id, ...source, processorKey: 'STUB_V1', contextMode: 'RELEVANT_CANON_V1', fingerprintVersion: 'V2' }); completeLegacyRun(legacy.id);
   const holder = createReviewQueue(storage); holder.stop(); const waiting = await holder.submit({ workId: fixture.workId, episodeId: fixture.episodes[0].id });
-  db.exec('DROP TABLE review_finding_decision_events; DROP TRIGGER review_job_processor_immutable; ALTER TABLE review_jobs DROP COLUMN processor_key; DELETE FROM schema_migrations WHERE version >= 14');
+  db.exec('DROP TABLE canon_staging_promotions; DROP TABLE canon_staging_records; DROP TABLE canon_staging_imports; DROP INDEX idx_canon_spaces_work_scope; DROP TABLE review_finding_decision_events; DROP TRIGGER review_job_processor_immutable; ALTER TABLE review_jobs DROP COLUMN processor_key; DELETE FROM schema_migrations WHERE version >= 14');
   const oldJobs = db.prepare('SELECT * FROM review_jobs ORDER BY queue_sequence').all(); const oldRuns = db.prepare('SELECT * FROM review_runs ORDER BY id').all(); const oldFindings = db.prepare('SELECT * FROM review_findings ORDER BY id').all();
   const file = path.join(root, 'novelcompany.db'); closeDatabase();
   const blocked = path.join(root, 'blocked'); fs.mkdirSync(blocked); const blockedFile = path.join(blocked, 'db'); fs.copyFileSync(file, blockedFile); fs.writeFileSync(path.join(blocked, 'backups'), '백업 실패 fixture');

@@ -1,10 +1,10 @@
 import type { CanonFieldDefinition, CanonFormValue, CanonRecordInput, CanonSetDefinition, ReferenceOption } from "../types/electron-api";
 
-type FieldProps = { field: CanonFieldDefinition; value: CanonFormValue; options: ReferenceOption[]; onChange: (value: CanonFormValue) => void };
+type FieldProps = { field: CanonFieldDefinition; value: CanonFormValue; options: ReferenceOption[]; onChange: (value: CanonFormValue) => void; idPrefix?: string };
 
 /** Field의 저장 타입과 입력 컨트롤 정의를 기본 HTML 입력으로 변환한다. */
-function CanonFieldRenderer({ field, value, options, onChange }: FieldProps) {
-  const id = "canon-field-" + field.id;
+export function CanonFieldRenderer({ field, value, options, onChange, idPrefix = 'canon-field-' }: FieldProps) {
+  const id = idPrefix + field.id;
   if (field.inputControl === "TEXT_INPUT") return <input id={id} value={typeof value === "string" ? value : ""} onChange={(event) => onChange(event.target.value)} />;
   if (field.inputControl === "TEXTAREA") return <textarea id={id} rows={4} value={typeof value === "string" ? value : ""} onChange={(event) => onChange(event.target.value)} />;
   if (field.inputControl === "NUMBER_INPUT") return <input id={id} type="number" step="any" value={typeof value === "number" ? value : ""} onChange={(event) => onChange(event.target.value === "" ? null : event.target.valueAsNumber)} />;

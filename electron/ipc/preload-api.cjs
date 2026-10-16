@@ -39,6 +39,24 @@ function createNovelCompanyApi(ipcRenderer) {
         ipcRenderer.invoke(IPC_CHANNELS.EPISODE_READ_CONTENT, episodeId),
     },
     canon: {
+      staging: {
+        /** 실제 Main channel로 등록 대기 목록을 조회한다. */
+        list: (scope) => ipcRenderer.invoke(IPC_CHANNELS.CANON_STAGING_LIST, scope),
+        /** 선택 공간의 후보 상세를 조회한다. */
+        get: (scope, id) => ipcRenderer.invoke(IPC_CHANNELS.CANON_STAGING_GET, scope, id),
+        /** revision을 포함한 임시 수정을 전달한다. */
+        update: (scope, id, input) => ipcRenderer.invoke(IPC_CHANNELS.CANON_STAGING_UPDATE, scope, id, input),
+        /** Main 파일 선택 미리보기를 요청한다. */
+        previewImport: (scope) => ipcRenderer.invoke(IPC_CHANNELS.CANON_STAGING_PREVIEW_IMPORT, scope),
+        /** 승인한 Import token을 전달한다. */
+        import: (scope, token, approved) => ipcRenderer.invoke(IPC_CHANNELS.CANON_STAGING_IMPORT, scope, token, approved),
+        /** 선택한 배치의 공식 등록을 검증한다. */
+        previewPromotion: (scope, selection) => ipcRenderer.invoke(IPC_CHANNELS.CANON_STAGING_PREVIEW_PROMOTION, scope, selection),
+        /** 승인한 Promotion token을 전달한다. */
+        promote: (scope, token, approved) => ipcRenderer.invoke(IPC_CHANNELS.CANON_STAGING_PROMOTE, scope, token, approved),
+        /** 보관된 미리보기를 취소한다. */
+        cancelPreview: () => ipcRenderer.invoke(IPC_CHANNELS.CANON_STAGING_CANCEL_PREVIEW),
+      },
       aliases: {
         /** 현재 작품 Character의 별칭만 조회한다. */
         list: (scope) => ipcRenderer.invoke(IPC_CHANNELS.CANON_ALIAS_LIST, scope),

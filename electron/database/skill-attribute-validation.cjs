@@ -90,7 +90,7 @@ function validateUpgrade(root) {
   closeDatabase();
   initializeDatabase(file);
   const upgraded = getDatabase();
-  assert.equal(upgraded.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count, 15);
+  assert.equal(upgraded.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count, 16);
   const newField = getCanonDefinitionBySetId(scope.skill.setId).fields.find(item => item.key === 'required_attribute');
   assert.equal(newField.referenceSet.id, scope.attribute.setId);
   assert.deepEqual(upgraded.prepare('SELECT * FROM canon_records WHERE id = ?').get(oldSkill.id), recordBefore);
@@ -130,7 +130,8 @@ function validateBackupFailure(root) {
   assert.throws(() => initializeDatabase(file));
   const readonly = new DatabaseSync(file, { readOnly: true });
   try {
-    assert.equal(readonly.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count, 12);
+    assert.equal(readonly.prepare('SELECT COUNT(*) count FROM schema_migrations').get().count, 14);
+    assert.equal(readonly.prepare('SELECT COUNT(*) count FROM schema_migrations WHERE version IN (8, 9)').get().count, 0);
     assert.equal(readonly.prepare("SELECT COUNT(*) count FROM canon_fields WHERE canon_set_id = ? AND key = 'required_attribute'").get(scope.skill.setId).count, 0);
   } finally { readonly.close(); }
 }

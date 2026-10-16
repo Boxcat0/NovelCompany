@@ -33,7 +33,8 @@ export function FindingDecisionEditor({ scope, isCurrent, onStateChange, onSaved
     } catch { if (mounted.current && request === sequence.current) setError('판단 이력을 불러오지 못했습니다. 다시 시도해 주세요.'); }
     finally { if (mounted.current && request === sequence.current) { pending.current = false; setBusy(false); } }
   }
-  useEffect(() => { mounted.current = true; void reload(); return () => { mounted.current = false; sequence.current++; }; }, []);
+  // StrictMode의 effect 재실행에서도 새 요청을 시작하고 이전 요청의 응답만 폐기한다.
+  useEffect(() => { mounted.current = true; void reload(); return () => { mounted.current = false; sequence.current++; pending.current = false; }; }, []);
   useLayoutEffect(() => { onStateChange(dirty, busy); }, [dirty, busy, onStateChange]);
   useEffect(() => () => onStateChange(false, false), [onStateChange]);
 

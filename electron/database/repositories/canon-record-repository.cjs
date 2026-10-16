@@ -205,16 +205,19 @@ function writeValues(definition, recordId, input) {
   }
 }
 
-/** 쓰기 전체를 즉시 잠금 transaction으로 보호하고 예외 시 모든 변경을 되돌린다. */
+/** 단독 쓰기는 transaction, 배치 안의 쓰기는 고유 savepoint로 보호하여 검증과 원자성을 재사용한다. */
 function withTransaction(action, code, message) {
   const db = getDatabase();
-  db.exec("BEGIN IMMEDIATE");
+  const nested = db.isTransaction;
+  const savepoint = 'canon_' + randomUUID().replaceAll('-', '');
+  db.exec(nested ? 'SAVEPOINT ' + savepoint : "BEGIN IMMEDIATE");
   try {
     const result = action();
-    db.exec("COMMIT");
+    db.exec(nested ? 'RELEASE ' + savepoint : "COMMIT");
     return result;
   } catch (error) {
-    db.exec("ROLLBACK");
+    db.exec(nested ? 'ROLLBACK TO ' + savepoint : "ROLLBACK");
+    if (nested) db.exec('RELEASE ' + savepoint);
     if (error instanceof RepositoryError) throw error;
     throw new RepositoryError(code, message, error);
   }
@@ -263,4 +266,11 @@ function deleteRecord(scope, recordId) {
   }, "CANON_RECORD_DELETE_FAILED", "설정 항목을 삭제하지 못했습니다.");
 }
 
-module.exports = { getBySetId, getById, getCreateReadiness, getReferenceOptions, create, update, delete: deleteRecord };
+/** 명시적으로 연결할 기존 항목에도 신규 필수값과 의미 규칙을 적용하되 어떤 값도 수정하지 않는다. */
+function validateExistingForPromotion(scope, recordId, input) {
+  const definition = requireDefinition(scope);
+  validateInput(definition, input);
+  validateSemantics(definition, getById(scope, recordId));
+}
+
+module.exports = { getBySetId, getById, getCreateReadiness, getReferenceOptions, create, update, delete: deleteRecord, validateExistingForPromotion };

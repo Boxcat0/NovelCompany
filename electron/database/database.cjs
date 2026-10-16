@@ -18,7 +18,7 @@ function inspectSkillAttributeUpgrade(connection) {
   return targets;
 }
 
-/** 연결을 열고 Definition·Review·작가 판단 migration 전에 백업과 대상 확인을 수행한다. */
+/** 연결을 열고 Definition·Review·작가 판단·Staging migration 전에 백업과 대상 확인을 수행한다. */
 function initializeDatabase(databasePath = getDatabaseFilePath()) {
   if (database) {
     return database;
@@ -42,10 +42,11 @@ function initializeDatabase(databasePath = getDatabaseFilePath()) {
     const needsFindings = hasMigrations && connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 12").get() && !connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 13").get();
     const needsProcessor = hasMigrations && connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 13").get() && !connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 14").get();
     const needsDecisions = hasMigrations && connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 14").get() && !connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 15").get();
-    if (needsTask017 || needsTask022 || needsTask024 || needsSkillAttribute || needsFingerprintVersion || needsReviewJobs || needsSceneNarration || needsAliases || needsFindings || needsProcessor || needsDecisions) {
+    const needsStaging = hasMigrations && connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 15").get() && !connection.prepare("SELECT 1 FROM schema_migrations WHERE version = 16").get();
+    if (needsTask017 || needsTask022 || needsTask024 || needsSkillAttribute || needsFingerprintVersion || needsReviewJobs || needsSceneNarration || needsAliases || needsFindings || needsProcessor || needsDecisions || needsStaging) {
       const backupDirectory = path.join(path.dirname(databasePath), "backups");
       fs.mkdirSync(backupDirectory, { recursive: true });
-      const backupPrefix = needsTask017 ? "before-task017-" : needsTask022 ? "before-task022-" : needsTask024 ? "before-task024-" : needsSkillAttribute || needsFingerprintVersion ? "before-task025-hf01-" : needsReviewJobs ? "before-task026-" : needsSceneNarration ? "before-task027-" : needsAliases ? "before-task028-" : needsFindings ? "before-task029-" : needsProcessor ? "before-task030-" : "before-task031-";
+      const backupPrefix = needsTask017 ? "before-task017-" : needsTask022 ? "before-task022-" : needsTask024 ? "before-task024-" : needsSkillAttribute || needsFingerprintVersion ? "before-task025-hf01-" : needsReviewJobs ? "before-task026-" : needsSceneNarration ? "before-task027-" : needsAliases ? "before-task028-" : needsFindings ? "before-task029-" : needsProcessor ? "before-task030-" : needsDecisions ? "before-task031-" : "before-canon-staging-";
       const backupPath = path.join(backupDirectory, backupPrefix + require("node:crypto").randomUUID() + ".db");
       connection.exec("VACUUM INTO '" + backupPath.replace(/'/g, "''") + "'");
     }
@@ -79,5 +80,16 @@ function closeDatabase() {
   }
 }
 
-module.exports = { closeDatabase, getDatabase, initializeDatabase };
+/** 동기 미리보기 동안만 독립 메모리 연결을 사용하고 예외에도 원래 연결을 복원한다. */
+function withDatabaseConnection(connection, action) {
+  const previous = database;
+  database = connection;
+  try {
+    const result = action();
+    if (result && typeof result.then === 'function') throw new Error('Database preview must be synchronous');
+    return result;
+  } finally { database = previous; }
+}
+
+module.exports = { closeDatabase, getDatabase, initializeDatabase, withDatabaseConnection };
 

@@ -181,6 +181,24 @@ function exposeNovelCompanyApi() {
       getNextAvailableNumber: getNextAvailableEpisodeNumber,
     },
     canon: {
+      staging: {
+        /** 선택 작품의 등록 대기 목록과 실제 Definition을 조회한다. */
+        list: (scope) => ipcRenderer.invoke('canon:staging:list', scope),
+        /** 같은 작품의 후보 상세만 조회한다. */
+        get: (scope, id) => ipcRenderer.invoke('canon:staging:get', scope, id),
+        /** 작가 수정본을 기대 revision으로 임시 저장한다. */
+        update: (scope, id, input) => ipcRenderer.invoke('canon:staging:update', scope, id, input),
+        /** Main 파일 선택과 읽기 전용 JSON 검증만 요청한다. */
+        previewImport: (scope) => ipcRenderer.invoke('canon:staging:preview-import', scope),
+        /** 별도 승인 token으로 Staging Import만 실행한다. */
+        import: (scope, token, approved) => ipcRenderer.invoke('canon:staging:import', scope, token, approved),
+        /** 선택 후보의 정식 Canon 적용 내용을 검증한다. */
+        previewPromotion: (scope, selection) => ipcRenderer.invoke('canon:staging:preview-promotion', scope, selection),
+        /** 최종 승인한 배치만 공식 Canon에 원자적으로 등록한다. */
+        promote: (scope, token, approved) => ipcRenderer.invoke('canon:staging:promote', scope, token, approved),
+        /** Main에 보관된 파일 및 승인 미리보기를 취소한다. */
+        cancelPreview: () => ipcRenderer.invoke('canon:staging:cancel-preview'),
+      },
       aliases: {
         /** 현재 작품 Character의 별칭만 조회한다. */
         list: (scope) => ipcRenderer.invoke('canon:aliases:list', scope),

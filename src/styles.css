@@ -587,3 +587,10 @@ h1 {
 .canon-readiness ul { padding-left: 18px; }
 .canon-readiness li { margin: 10px 0; }
 .canon-form-field > p button, .canon-readiness button { font: inherit; padding: 5px 8px; border: 1px solid #bac6d6; border-radius: 5px; background: white; color: #244c76; cursor: pointer; }
+/* 등록 대기 원본과 적용 전후 JSON을 기존 Canon UI 안에서 읽기 좋게 제한한다. */
+.canon-staging-panel { margin-top: 1rem; }
+.canon-staging-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 18rem; overflow: auto; }
+.staging-list { max-height: 24rem; overflow: auto; padding-left: 1.5rem; }
+.staging-list li { margin: .5rem 0; }
+.staging-filters { display: flex; flex-wrap: wrap; gap: 1rem; }
+.staging-import-preview, .staging-editor, .staging-promotion-preview { border: 1px solid #d6dbe5; border-radius: .5rem; padding: 1rem; margin: 1rem 0; }

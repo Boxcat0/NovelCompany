@@ -27,6 +27,22 @@ function snapshot() {
 /** 코드와 한국어 메시지가 의도한 입력 실패를 정확하게 표현하는지 확인한다. */
 function rejects(action, code) { assert.throws(action, error => error.code === code && /[가-힣]/.test(error.message)); }
 
+/** 새 Node 프로세스의 실제 Repository에서 상태·메모·전체 이력의 영속성을 확인한다. */
+function assertRestartHistory(dataRoot, scope, expected) {
+  const code = `const path = require('node:path');
+    const { initializeDatabase, closeDatabase } = require(path.join(process.argv[3], 'database/database.cjs'));
+    try {
+      initializeDatabase(path.join(process.argv[1], 'novelcompany.db'));
+      const repository = require(path.join(process.argv[3], 'database/repositories/review-decision-repository.cjs'));
+      process.stdout.write(JSON.stringify(repository.listFindingDecisionHistory(JSON.parse(process.argv[2]))));
+    } finally { closeDatabase(); }`;
+  const restarted = spawnSync(process.execPath, ['-e', code, dataRoot, JSON.stringify(scope), path.join(__dirname, '..')], {
+    env: { ...process.env, NOVEL_COMPANY_DATA_DIR: dataRoot }, encoding: 'utf8', windowsHide: true, timeout: 15000,
+  });
+  assert.equal(restarted.status, 0, restarted.error?.message ?? restarted.stderr);
+  assert.deepEqual(JSON.parse(restarted.stdout), expected);
+}
+
 /** 실제 Rule Finding에서 상태·순번·원본 불변·IPC·Queue·현재성·재검토를 검사한다. */
 async function repositoryCases(storage) {
   const fixture = createRuleFixture(storage, '판단 검증 작품');
@@ -107,6 +123,7 @@ function backupCases(scope) {
   backup.exportSnapshot(source, zip, '0.1.0'); closeDatabase(); fs.mkdirSync(target); initializeDatabase(path.join(target, 'novelcompany.db'));
   backup.replaceData(target, zip, '0.1.0'); backup.recoverInterruptedRestore(target); initializeDatabase(path.join(target, 'novelcompany.db'));
   assert.deepEqual(decisions.listFindingDecisionHistory(scope), expected);
+  closeDatabase(); assertRestartHistory(target, scope, expected); initializeDatabase(path.join(target, 'novelcompany.db'));
   decisions.appendFindingDecision({ ...scope, decisionStatus: 'DEFERRED', note: '로컬 판단 보존', expectedRevision: 7 });
   const local = decisions.listFindingDecisionHistory(scope);
   closeDatabase(); initializeDatabase(path.join(source, 'novelcompany.db'));
@@ -124,8 +141,8 @@ function backupCases(scope) {
   backup.replaceData(target, refreshed.mergedZip, '0.1.0'); backup.recoverInterruptedRestore(target); initializeDatabase(path.join(target, 'novelcompany.db'));
   assert.deepEqual(decisions.listFindingDecisionHistory(scope), latest); assert.equal(local.length, 8);
   assert.equal(getDatabase().prepare('SELECT description FROM works WHERE id = ?').get(scope.workId).description, '원격 작품 정보 수정');
-  closeDatabase(); initializeDatabase(path.join(target, 'novelcompany.db')); assert.deepEqual(decisions.listFindingDecisionHistory(scope), latest); closeDatabase();
-  console.log('PASS decisions backup/update: Schema 015 ZIP, exact history restore/reopen, local decisions preserved, remote excluded, stale preview blocked');
+  closeDatabase(); assertRestartHistory(target, scope, latest);
+  console.log('PASS decisions backup/update: latest Schema ZIP, exact history restore/new-process restart, local decisions preserved, remote excluded, stale preview blocked');
 }
 
 /** 정식 014 데이터의 사전 백업·015 추가·실패 보존과 ZIP 격리 Migration을 검사한다. */
@@ -133,21 +150,49 @@ function migrationCases() {
   const directory = path.join(root, 'schema14'); fs.mkdirSync(directory);
   const file = path.join(directory, 'novelcompany.db'), db = new DatabaseSync(file);
   require('../database/migrate.cjs').runMigrations(db, path.join(__dirname, '../database/migrations'), 14);
-  db.prepare('INSERT INTO works VALUES (?, ?, ?, ?, ?, ?)').run('legacy-work', '이전 작품', null, 'ACTIVE', '2026-01-01', '2026-01-01'); db.close();
+  db.exec('PRAGMA foreign_keys = ON');
+  const now = '2026-01-01T00:00:00.000Z', content = Buffer.from('이전 회차 원문\r\n판단 이전의 검토 결과'), storageKey = new LocalEpisodeStorage(directory).getStorageKey('legacy-work', 1);
+  const originalTxt = path.join(directory, 'works', storageKey);
+  fs.mkdirSync(path.dirname(originalTxt), { recursive: true }); fs.writeFileSync(originalTxt, content);
+  db.prepare('INSERT INTO works VALUES (?, ?, ?, ?, ?, ?)').run('legacy-work', '이전 작품', null, 'ACTIVE', now, now);
+  db.prepare('INSERT INTO episodes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run('legacy-episode', 'legacy-work', 1, '이전 회차', 'DRAFT', storageKey, backup.sha256(content), now, now);
+  db.prepare("INSERT INTO review_runs (id, work_id, episode_id, status, processor_key, episode_content_hash, canon_context_hash, created_at, started_at, completed_at) VALUES (?, ?, ?, 'COMPLETED', 'STUB_V1', ?, ?, ?, ?, ?)").run('legacy-run', 'legacy-work', 'legacy-episode', backup.sha256(content), 'legacy-canon-hash', now, now, now);
+  db.prepare('INSERT INTO review_findings (id, review_run_id, category, message, sort_order, created_at) VALUES (?, ?, ?, ?, ?, ?)').run('legacy-finding', 'legacy-run', 'TEXT', '이전 발견 사항 원본', 0, now);
+  const tables = ['works', 'episodes', 'review_runs', 'review_findings'];
+  const originalRows = tables.map(table => db.prepare('SELECT * FROM ' + table + ' ORDER BY id').all());
+  db.close();
   const bytes = fs.readFileSync(file), output = path.join(root, 'schema14.zip');
-  const manifest = { formatVersion: backup.FORMAT, createdAt: new Date().toISOString(), applicationVersion: '0.1.0', databaseSchemaVersion: 14, files: [{ relativePath: backup.DB_ENTRY, size: bytes.length, sha256: backup.sha256(bytes) }] };
-  require('../backup/backup-zip.cjs').writeZip(output, [{ name: 'manifest.json', data: Buffer.from(JSON.stringify(manifest)) }, { name: backup.DB_ENTRY, data: bytes }]);
+  const manuscriptEntry = 'manuscripts/' + storageKey;
+  const manifest = { formatVersion: backup.FORMAT, createdAt: new Date().toISOString(), applicationVersion: '0.1.0', databaseSchemaVersion: 14, files: [{ relativePath: backup.DB_ENTRY, size: bytes.length, sha256: backup.sha256(bytes) }, { relativePath: manuscriptEntry, size: content.length, sha256: backup.sha256(content) }] };
+  require('../backup/backup-zip.cjs').writeZip(output, [{ name: 'manifest.json', data: Buffer.from(JSON.stringify(manifest)) }, { name: backup.DB_ENTRY, data: bytes }, { name: manuscriptEntry, data: content }]);
   const originalZip = fs.readFileSync(output);
   const validated = backup.validatePackage(output, path.join(root, 'schema14-import'));
-  assert.equal(validated.sourceSchemaVersion, 14); assert.equal(validated.summary.databaseSchemaVersion, 15);
+  assert.equal(validated.sourceSchemaVersion, 14); assert.equal(validated.summary.databaseSchemaVersion, 16);
   assert.deepEqual(fs.readFileSync(output), originalZip); assert.deepEqual(fs.readFileSync(file), bytes);
+  const restored = path.join(root, 'schema14-restored');
+  initializeDatabase(path.join(restored, 'novelcompany.db'));
+  backup.replaceData(restored, output, '0.1.0'); backup.recoverInterruptedRestore(restored);
+  initializeDatabase(path.join(restored, 'novelcompany.db'));
+  assert.deepEqual(tables.map(table => getDatabase().prepare('SELECT * FROM ' + table + ' ORDER BY id').all()), originalRows);
+  assert.deepEqual(fs.readFileSync(path.join(restored, 'works', storageKey)), content);
+  const scope = { workId: 'legacy-work', episodeId: 'legacy-episode', reviewRunId: 'legacy-run', findingId: 'legacy-finding' };
+  assert.equal(decisions.getFindingDecision(scope).decisionStatus, 'UNREVIEWED');
+  closeDatabase(); assertRestartHistory(restored, scope, []);
   const blocked = path.join(root, 'migration-blocked'); fs.mkdirSync(blocked); fs.copyFileSync(file, path.join(blocked, 'db')); fs.writeFileSync(path.join(blocked, 'backups'), 'blocked');
   assert.throws(() => initializeDatabase(path.join(blocked, 'db'))); assert.deepEqual(fs.readFileSync(path.join(blocked, 'db')), bytes);
   initializeDatabase(file); assert.equal(getDatabase().prepare('SELECT COUNT(*) n FROM review_finding_decision_events').get().n, 0);
+  assert.deepEqual(tables.map(table => getDatabase().prepare('SELECT * FROM ' + table + ' ORDER BY id').all()), originalRows);
   assert.equal(getDatabase().prepare('SELECT title FROM works').get().title, '이전 작품');
-  assert.equal(fs.readdirSync(path.join(directory, 'backups')).filter(name => name.startsWith('before-task031-')).length, 1);
+  assert.deepEqual(fs.readFileSync(originalTxt), content);
+  const backups = fs.readdirSync(path.join(directory, 'backups')).filter(name => name.startsWith('before-task031-'));
+  assert.equal(backups.length, 1);
+  const saved = new DatabaseSync(path.join(directory, 'backups', backups[0]), { readOnly: true });
+  try {
+    assert.equal(saved.prepare('SELECT MAX(version) version FROM schema_migrations').get().version, 14);
+    assert.deepEqual(tables.map(table => saved.prepare('SELECT * FROM ' + table + ' ORDER BY id').all()), originalRows);
+  } finally { saved.close(); }
   closeDatabase(); initializeDatabase(file); assert.equal(fs.readdirSync(path.join(directory, 'backups')).length, 1); closeDatabase();
-  console.log('PASS migration 014→015: before-write backup/failure/idempotence/data preservation/isolated ZIP conversion/original ZIP unchanged');
+  console.log('PASS migration 014→latest: before-write backup/failure/idempotence/Review rows preserved/isolated ZIP conversion/full DB+TXT restore/new-process restart/original ZIP unchanged');
 }
 
 /** 임시 저장소만 사용하여 판단·복원·실제 Electron UI 검증을 실행한다. */

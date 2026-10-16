@@ -1,10 +1,22 @@
 # NovelCompany 아키텍처 결정 기록
 
+## Task031-EXT01 — 보관·검증·공식 등록을 분리한다
+
+- 미확정 후보를 공식 Canon에 강제로 넣지 않는다. Schema 016의 전용 Staging에 원본 전체와 작가 수정본을 보존한다. Import는 Staging만 쓰고 Promotion은 별도 최종 승인이 있어야 한다.
+- 실제 Definition과 기존 Repository의 필수/Option/참조/의미 규칙을 그대로 쓴다. Character의 출신 지역·속성·패시브, Skill.required_attribute, Passive 유형, Organization.location과 Relationship.relationship_type 등 현재 설치 정의를 따른다. 임의 기본값·설정·alias를 생성하지 않는다.
+- Preview는 독립 메모리 Canon DB에서 실제 Repository를 실행하고 운영 DB에는 쓰지 않는다. 실행은 기존 Repository를 savepoint로 재사용하는 하나의 배치 transaction이다. 부분 등록과 부분 승인 연결을 남기지 않는다.
+- 원본/수정본의 비공개 후보는 V1 정식 등록을 차단한다. 모든 Staging은 일반 ReviewContext와 Alias에서 제외한다. 비공개 공개 시점/권한 엔진은 후속 Task다. 공개 후보도 미래 설정을 작가가 직접 확인해야 한다.
+- 동일 SHA는 재사용하고, 달라진 동일 논리키는 자동 덮어쓰지 않는다. 작가 수정·기존 승격 여부를 Preview에 구분한다. 기존 공식 Record의 이름만으로 병합하거나 수정하지 않는다. 직접 선택한 기존 Record와 정확히 일치할 때만 연결한다.
+- 창별 만료 token, 수정 revision, Canon/Definition fingerprint를 최종 실행 전에 재확인한다. 실제 작업 성공 후에만 완료 안내한다. QUEUED/RUNNING 검토와 배타 데이터 작업 gate를 존중한다.
+- 전체 ZIP에 Staging·비공개 표시·승인 UUID를 포함하며 공식 구형 ZIP은 격리 Migration으로 지원한다. 안전한 양방향 병합이 없는 HF03-B는 양측 중 Staging Import가 발견되면 지원 제한으로 중단한다. 실제 두 PC ZIP 문제의 보류 상태는 바꾸지 않는다.
+- 실제 5차 원본은 미제공이므로 실제 168개/비공개8개/소설별 검토는 NOT VERIFIED로 남긴다. 개발 Fixture는 동일 개수의 가상 데이터이며 실제 작품의 설정을 재현했다고 주장하지 않는다.
+
 ## Task031 — 검토 엔진의 발견과 작가 판단은 별개다
 
 - ReviewFinding 원본을 수정하지 않고 `review_finding_decision_events`에 판단을 추가한다. UNREVIEWED는 이력 없는 상태이며 저장 이벤트는 NEEDS_FIX/REJECTED/DEFERRED/RESOLVED만 허용한다. RESOLVED는 작가 선언이지 프로그램의 해결 인증이 아니다.
 - 최신 판단은 시각이 아닌 Finding별 최대 revision으로 결정한다. 트랜잭션과 expectedRevision으로 오래된 저장을 거부한다. 동일 상태/메모의 반복 저장은 새 이벤트를 만들지 않는다. 기존 이벤트 UPDATE/직접 DELETE는 금지하되 부모 Finding의 정상 삭제 lifecycle에는 cascade를 허용한다.
 - Work/Episode/Run/Finding 소속은 Main Repository에서 재검증한다. UI는 Run별 요약 조회로 N+1 IPC를 피하고, 미저장 입력과 지연 응답을 보호한다. 검토 결과 새로고침 중에도 판단 초안을 유지한다.
+- 개발 모드 StrictMode의 effect 재실행도 지원한다. 정리된 요청의 pending 잠금은 해제하고 sequence 검사는 유지하여 무한 로딩과 이전 응답 적용을 함께 방지한다. 두 Preload의 판단 API는 동일한 channel/입력을 전달하는 계약 테스트로 확인한다.
 - 판단 저장은 ReviewJob, fingerprint, TXT, Canon을 변경하지 않는다. 기존 검토가 QUEUED/RUNNING인 동안 과거 Finding에 판단을 기록할 수 있다. Freshness STALE/UNAVAILABLE 및 Legacy 여부와 판단 상태는 독립이다. 재검토 시 유사 Finding에도 판단을 자동 승계하지 않는다.
 - Migration 015 전 자동 백업과 기존 001~014 불변을 지킨다. 전체 ZIP 복원은 판단 이력까지 복원하고, 014 ZIP은 격리 정식 Migration으로 지원한다. 미래/변조 Schema 거부 정책은 유지한다.
 - HF03-B 업데이트는 로컬 판단 이력을 보존하고 원격 판단 이력은 병합하지 않는다. 양방향 판단 병합에는 별도 기준본/충돌 설계가 필요하다. 실제 PC 간 ZIP 가져오기 결함은 계속 보류하며 이번 작업 범위가 아니다.

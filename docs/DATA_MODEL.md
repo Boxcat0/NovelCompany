@@ -1,5 +1,23 @@
 # NovelCompany 데이터 모델 설계
 
+## Task031-EXT01 — Schema 016 / Canon Staging
+
+기존 Migration 001~015를 유지하고 `016_add_canon_staging.sql`을 추가한다. 기존 015 DB는 적용 전 `before-canon-staging-<UUID>.db`로 백업하며 백업 실패 시 쓰지 않는다.
+
+| 테이블 | 주요 데이터와 제약 |
+|---|---|
+| canon_staging_imports | UUID, Work/CanonSpace 복합 FK CASCADE, 파일명, 원본 SHA-256, Import 형식, 후보 수, 수행 결과 JSON(생성/재사용 수), 전체 원본 snapshot, 시각. UNIQUE(space, SHA). |
+| canon_staging_records | UUID, Work/CanonSpace, 원본 Import 복합 FK CASCADE, Set key/draft_key, source_json/current_json, author_edited, revision, 생성/수정 시각. UNIQUE(space, draft_key). |
+| canon_staging_promotions | 후보당 승인 연결 1개, 실제 CanonSet, nullable CanonRecord FK SET NULL, 원래 record_uuid, 승인 revision/시각, CREATE/LINK. 후보/Set 삭제 시 CASCADE. |
+
+CanonSpace의 `(id, work_id)` 인덱스와 Import의 `(id, canon_space_id, work_id)` UNIQUE를 추가하여 후보가 다른 작품 Import를 참조하지 못하게 한다. 후보 목록은 `(canon_space_id, set_key, id)` 인덱스를 사용한다. 원본 추가 메타데이터와 미확정값은 JSON 그대로 보존한다. author_private 원본 값은 별도로 source_json에 남기며 수정본에서 숨길 수 없다. 현재 검증 상태는 저장된 import_ready가 아닌 실제 Definition/기존 Canon Repository 결과로 파생한다.
+
+정식 상태는 DRAFT(비공개 보류), NEEDS_INPUT, CONFLICT, READY, PROMOTED다. READY는 등록 승인과 다르다. 현재 입력과 원본을 분리하고 revision CAS로 임시 수정한다. Promotion 이후에는 후보 수정과 자동 재등록을 차단한다. 공식 Record가 나중에 삭제되면 원래 UUID/승인 이력은 보존하고 참조 상실을 표시한다. 자동 재생성은 후속 범위다.
+
+원본은 `NOVELCOMPANY_CANON_JSON_V1` 구조와 자유로운 원본 version 메타데이터를 구분한다. Option은 실제 Definition의 value/ID로, 참조는 논리 draft_key 또는 작가가 선택한 `record:<UUID>`로 표현한다. 미리보기에서 기존 UUID와 배치 내 생성 예정 대상을 구분하며 임시 메모리 UUID를 실제 승인 UUID로 표시하지 않는다.
+
+Canon 전체 삭제 영향에 Staging Import/후보/승인 행 수를 포함한다. 기존 Work 삭제 제한을 유지하며 Canon 삭제의 마지막 CanonSpace 제거에서 Staging을 cascade 정리한다. 기존 ReviewRun/Finding/Decision과 Episode/TXT에는 FK나 수정 경로를 추가하지 않는다. 전체 ZIP은 신규 세 테이블을 보존하며 HF03-B는 어느 쪽에라도 Staging Import가 있으면 명시적으로 지원을 거부한다. 현재 최신 Schema는 016이며 아래 Task별 번호는 당시 계약이다.
+
 ## Task031 — Schema 015 / Author Decision Events
 
 `015_add_review_finding_decision_events.sql`만 추가하며 Migration 001~014 및 기존 ReviewFinding 계약은 변경하지 않는다.
@@ -18,6 +36,8 @@
 Repository는 Work→Episode→Run→Finding을 검증하며 `expectedRevision`이 현재 값과 다르면 한국어 충돌 오류로 저장을 거부한다. 원자적 저장, 같은 상태·메모 no-op, 네 가지 상태 간 재변경을 지원한다. UNREVIEWED로 초기화하거나 과거 이벤트를 수정/삭제하는 API는 없다. Freshness와 독립적이며 다른 Run으로 승계하지 않는다.
 
 Schema 015 전체 ZIP에 이벤트 전체를 보관한다. 정식 014 ZIP은 격리 Migration 후 빈 판단 테이블을 갖는다. 기존 Review/TXT 원본은 보존한다. HF03-B 논리 병합 대상에 이벤트를 추가하지 않으며 로컬 이력은 유지하고 원격 이력은 제외한다. 양방향 판단 이력 병합은 후속 별도 설계 대상이다. 아래 Task별 Schema 번호는 당시 계약이며 현재 최신 지원은 015다.
+
+검증은 014의 실제 Work/Episode/ReviewRun/Finding 행과 TXT를 포함한 ZIP을 전체 교체한 뒤 원본 행·TXT bytes를 대조한다. Migration 전 자동 백업도 Schema 014와 원본 행을 유지해야 한다. 015 전체 복원과 HF03-B 적용 후에는 별도 새 Node 프로세스의 Repository로 전체 판단 이력(상태·메모·revision·시각·이벤트 ID)을 재조회해 비교한다.
 
 ## Task030-HF02 — Backup Package V1
 

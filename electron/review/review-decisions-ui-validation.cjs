@@ -41,6 +41,10 @@ async function exercise(fixture) {
   button('Review 결과 확인').click();
   await waitFor(() => document.getElementById('finding-decision-note')?.value.includes('작가 메모'), '새로고침 draft 유지');
   button('판단 저장').click(); button('판단 저장').click();
+  await waitFor(() => button('최신 판단 다시 불러오기').disabled, '저장 응답 대기');
+  window.confirm = () => true;
+  episode(2).click(); button('설정').click(); input('finding-decision-filter', 'RESOLVED');
+  check(document.getElementById('episode-number')?.value === '1' && !!document.getElementById('finding-decision-note') && document.getElementById('finding-decision-filter').value === 'ALL', '저장 중 화면/회차/필터 이동');
   await waitFor(() => document.querySelector('.finding-decision-editor')?.textContent.includes('판단 순번 1') && !button('최신 판단 다시 불러오기').disabled, '판단 저장');
   check(!document.querySelector('.finding-decision-editor img'), '메모 HTML 실행');
   const stored = await window.novelCompany.reviews.decisions.history(fixture.scope);
@@ -63,7 +67,7 @@ async function exercise(fixture) {
   await waitFor(() => document.querySelector('.finding-decision-editor [role=alert]')?.textContent.includes('다른 창에서 판단이 변경'), '충돌 오류');
   window.confirm = () => true; button('최신 판단 다시 불러오기').click();
   await waitFor(() => document.getElementById('finding-decision-note')?.value === '다른 창 판단', '충돌 재조회');
-  return { states: true, history: true, filters: true, dirty: true, refreshDraft: true, duplicate: true, conflict: true, staleSummary: true, safeText: true };
+  return { states: true, history: true, filters: true, dirty: true, busyNavigation: true, refreshDraft: true, duplicate: true, conflict: true, staleSummary: true, safeText: true };
 }
 
 /** 임시 DB와 실제 Preload/IPC를 사용하고 판단 이외 테이블의 불변을 확인한다. */
@@ -81,8 +85,8 @@ async function run() {
     const register = name => require('../ipc/' + name + '-handlers.cjs');
     register('work').registerWorkHandlers(ipcMain); register('canon').registerCanonHandlers(ipcMain); register('episode').registerEpisodeHandlers(ipcMain, storage); register('context').registerContextHandlers(ipcMain, storage);
     const originalHandle = ipcMain.handle.bind(ipcMain);
-    /** 실제 Repository 결과만 지연시켜 회차 전환 응답 경합을 재현한다. */
-    ipcMain.handle = (channel, handler) => originalHandle(channel, async (...args) => { const result = await handler(...args); if (channel === 'reviews:decisions:list') await new Promise(resolve => setTimeout(resolve, 500)); return result; });
+    /** 실제 Repository 조회·저장 결과를 지연시켜 늦은 응답과 저장 중 이동을 검사한다. */
+    ipcMain.handle = (channel, handler) => originalHandle(channel, async (...args) => { const result = await handler(...args); if (['reviews:decisions:list', 'reviews:decisions:append'].includes(channel)) await new Promise(resolve => setTimeout(resolve, 500)); return result; });
     queue = require('./review-queue-service.cjs').createReviewQueue(storage); register('review').registerReviewHandlers(ipcMain, storage, queue);
     register('backup').registerBackupHandlers(ipcMain, { dataRoot: root, applicationVersion: '0.1.0', queue, dialog: {} });
     window = new BrowserWindow({ show: false, webPreferences: { preload: path.join(__dirname, '../preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, offscreen: true, backgroundThrottling: false } });

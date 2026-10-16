@@ -86,7 +86,7 @@ function runCityUpgrade(scope) {
   const file = getDatabaseFilePath();
   const readonly = new DatabaseSync(file, { readOnly: true });
   try {
-    if (readonly.prepare('SELECT MAX(version) version FROM schema_migrations').get().version !== 15) throw new RepositoryError('CANON_CITY_SCHEMA_NOT_READY', '먼저 앱의 기존 DB migration을 완료한 뒤 City 추가를 실행해 주세요.');
+    if (readonly.prepare('SELECT MAX(version) version FROM schema_migrations').get().version !== 16) throw new RepositoryError('CANON_CITY_SCHEMA_NOT_READY', '먼저 앱의 기존 DB migration을 완료한 뒤 City 추가를 실행해 주세요.');
     inspectCityDefinitionUpgrade(readonly, scope);
   } finally { readonly.close(); }
   try { initializeDatabase(file); return upgradeCityCanonDefinition(scope); }

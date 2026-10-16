@@ -51,7 +51,7 @@ async function exerciseSettings(restart = false) {
   await waitFor(() => document.querySelector('[role=alert]')?.textContent.includes('ZIP'));
   button('데이터 가져오기').click();
   await waitFor(() => document.querySelector('.backup-preview'));
-  check(document.querySelector('.backup-preview').textContent.includes('가져올 작품 1개 · 가져올 회차 2개 · DB Schema 15'), 'verified summary');
+  check(document.querySelector('.backup-preview').textContent.includes('가져올 작품 1개 · 가져올 회차 2개 · DB Schema 16'), 'verified summary');
   check(document.querySelector('.backup-preview').textContent.includes('자동 백업'), 'replacement and backup warning');
   document.querySelector('input[name="backup-mode"][value="update"]').click();
   await waitFor(() => !document.querySelector('fieldset').disabled && !document.querySelector('.backup-preview'));
@@ -125,7 +125,7 @@ async function run() {
         /** 첫 손상 입력 뒤 정상 백업을 선택해 Main 검증을 실행한다. */
         async showOpenDialog() { opens++; if (opens === 4) divergeTarget(); return { canceled: false, filePaths: [opens === 1 ? corrupt : output] }; },
         /** 선택만으로 교체되지 않고 취소 후 별도 최종 승인이 필요함을 검사한다. */
-        async showMessageBox(input) { confirmations++; assert.equal(input.cancelId, 0); assert.ok(input.message.includes('모든')); assert.ok(input.detail.includes('백업 생성일:') && input.detail.includes('작품: 1개 / 회차: 2개') && input.detail.includes('DB Schema: 15') && input.detail.includes('자동 백업')); await new Promise(resolve => setTimeout(resolve, 100)); return { response: confirmations === 1 ? 0 : 1 }; },
+        async showMessageBox(input) { confirmations++; assert.equal(input.cancelId, 0); assert.ok(input.message.includes('모든')); assert.ok(input.detail.includes('백업 생성일:') && input.detail.includes('작품: 1개 / 회차: 2개') && input.detail.includes('DB Schema: 16') && input.detail.includes('자동 백업')); await new Promise(resolve => setTimeout(resolve, 100)); return { response: confirmations === 1 ? 0 : 1 }; },
       },
       /** 테스트의 앱 재시작은 부모가 새 Electron 프로세스를 실행하도록 표시한다. */
       onRestored() { restored = true; },

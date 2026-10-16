@@ -85,7 +85,7 @@ function createCanonSpaceForWork(workId) {
   }
 }
 
-/** 한 SELECT의 일관된 snapshot으로 작품 존재와 Generic/Legacy 전체 삭제 영향을 집계한다. */
+/** 한 SELECT로 작품 존재와 Generic/Legacy/Staging 전체 삭제 영향을 일관되게 집계한다. */
 function getCanonDeletionStatus(workId) {
   requireId(workId, "WORK_ID_REQUIRED", "작품 ID를 입력해 주세요.");
   try {
@@ -94,6 +94,7 @@ function getCanonDeletionStatus(workId) {
     const legacyCount = legacyDeletionTables.map((table) => `(SELECT COUNT(*) FROM ${table} WHERE canon_space_id = c.id)`).join(" + ");
     const row = getDatabase().prepare(`SELECT c.id AS canonSpaceId, ${genericCounts.join(", ")},
       (SELECT COUNT(*) FROM canon_record_aliases a JOIN canon_records r ON r.id = a.canon_record_id WHERE r.canon_space_id = c.id) AS aliasCount,
+      ((SELECT COUNT(*) FROM canon_staging_imports WHERE canon_space_id = c.id) + (SELECT COUNT(*) FROM canon_staging_records WHERE canon_space_id = c.id) + (SELECT COUNT(*) FROM canon_staging_promotions p JOIN canon_staging_records s ON s.id = p.staging_record_id WHERE s.canon_space_id = c.id)) AS stagingRowCount,
       (${legacyCount}) AS legacyDataCount
       FROM works w LEFT JOIN canon_spaces c ON c.work_id = w.id WHERE w.id = ?`).get(workId);
     if (!row) throw new RepositoryError("WORK_NOT_FOUND", "선택한 작품을 찾을 수 없습니다.");
@@ -104,7 +105,8 @@ function getCanonDeletionStatus(workId) {
       ...counts,
       legacyDataCount: row.legacyDataCount,
       aliasCount: row.aliasCount,
-      totalDependentRowCount: Object.values(counts).reduce((total, count) => total + count, row.legacyDataCount + row.aliasCount),
+      stagingRowCount: row.stagingRowCount,
+      totalDependentRowCount: Object.values(counts).reduce((total, count) => total + count, row.legacyDataCount + row.aliasCount + row.stagingRowCount),
     };
   } catch (cause) {
     if (cause instanceof RepositoryError) throw cause;

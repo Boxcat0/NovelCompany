@@ -28,6 +28,7 @@ export type StoredEpisode = Episode & {
 
 export type CanonSpace = { id: string; workId: string; templateKey: string; createdAt: string; updatedAt: string };
 export type CanonDeletionStatus = {
+  stagingRowCount: number;
   aliasCount: number;
   exists: boolean;
   canonSpaceId: string | null;
@@ -46,6 +47,15 @@ export type CanonSet = { id: string; canonSpaceId: string; key: string; name: st
 export type CanonFieldDefinition = { id: string; key: string; label: string; valueType: string; inputControl: string; required: boolean; helpText: string | null; sortOrder: number; referenceSet: { id: string; key: string; name: string } | null; options: Array<{ id: string; value: string; label: string; sortOrder: number }> };
 export type CanonSetDefinition = CanonSet & { fields: CanonFieldDefinition[] };
 export type CanonScope = { canonSpaceId: string; setId: string };
+export type CanonStagingScope = { workId: string; canonSpaceId: string };
+export type CanonStagingStatus = 'DRAFT' | 'NEEDS_INPUT' | 'CONFLICT' | 'READY' | 'PROMOTED';
+export type CanonStagingCandidate = { draft_key: string; display_name: string; fields: Record<string, CanonFormValue>; references: Record<string, CanonFormValue>; source_episodes?: number[]; author_private?: boolean; [key: string]: unknown };
+export type CanonStagingInput = { displayName: string; fields: Record<string, CanonFormValue>; references: Record<string, CanonFormValue>; authorPrivate: boolean; expectedRevision: number };
+export type CanonPromotionSelection = { id: string; expectedRevision: number; existingRecordId?: string };
+export type CanonPromotionEntry = { id: string; draftKey: string; setKey: string; displayName: string; revision: number; status: CanonStagingStatus; errors: string[]; mode: 'CREATE' | 'LINK' | 'REUSE'; authorPrivate: boolean; recordId: string | null; fields: Record<string, CanonFormValue>; references: Record<string, CanonFormValue>; referenceTargets?: Array<{ fieldKey: string; target: string; recordId: string | null; displayName: string | null; source: 'OFFICIAL' | 'BATCH' | 'UNRESOLVED' }> };
+export type CanonPromotionPreview = { entries: CanonPromotionEntry[]; canExecute: boolean; fingerprint: string; token: string | null };
+export type CanonStagingRecord = { id: string; setKey: string; draftKey: string; source: CanonStagingCandidate; candidate: CanonStagingCandidate; revision: number; authorEdited: boolean; createdAt: string; updatedAt: string; validation?: CanonPromotionEntry; promotion: null | { recordId: string | null; recordUuid: string; setId: string; approvedRevision: number; approvedAt: string; mode: 'CREATE' | 'LINK' } };
+export type CanonImportPreview = { token: string; fileName: string; alreadyImported: boolean; sourceHash: string; sourceVersion: string; workTitle: string; counts: Record<string, number>; total: number; privateCount: number; newCount: number; reusedCount: number; conflictCount: number; holdCount: number; nameConflictCount: number; items: Array<{ draftKey: string; setKey: string; displayName: string; action: string; nameConflict: boolean; authorPrivate: boolean; issues: string[]; before: CanonStagingCandidate | null; after: CanonStagingCandidate }> };
 export type CanonAliasScope = { workId: string; recordId: string };
 export type CanonAlias = { id: string; recordId: string; aliasText: string; createdAt: string; updatedAt: string };
 export type CanonFormValue = string | number | boolean | null | string[];
@@ -221,6 +231,16 @@ export interface NovelCompanyApi {
     getNextAvailableNumber(workId: string): Promise<IpcResult<number>>;
   };
   canon: {
+    staging: {
+      list(scope: CanonStagingScope): Promise<IpcResult<{ definitions: CanonSetDefinition[]; officialRecords: CanonRecordSummary[]; records: CanonStagingRecord[] }>>;
+      get(scope: CanonStagingScope, id: string): Promise<IpcResult<CanonStagingRecord>>;
+      update(scope: CanonStagingScope, id: string, input: CanonStagingInput): Promise<IpcResult<CanonStagingRecord>>;
+      previewImport(scope: CanonStagingScope): Promise<IpcResult<CanonImportPreview | null>>;
+      import(scope: CanonStagingScope, token: string, approved: boolean): Promise<IpcResult<{ importId?: string; alreadyImported: boolean; createdCount: number; reusedCount: number }>>;
+      previewPromotion(scope: CanonStagingScope, selection: CanonPromotionSelection[]): Promise<IpcResult<CanonPromotionPreview>>;
+      promote(scope: CanonStagingScope, token: string, approved: boolean): Promise<IpcResult<{ entries: CanonPromotionEntry[] }>>;
+      cancelPreview(): Promise<IpcResult<null>>;
+    };
     aliases: {
       list(scope: CanonAliasScope): Promise<IpcResult<CanonAlias[]>>;
       create(scope: CanonAliasScope, text: string): Promise<IpcResult<CanonAlias>>;

@@ -83,7 +83,7 @@ async function startApplication() {
     await episodeStorage.ensureBaseStorage();
     initializeDatabase();
     registerWorkHandlers(ipcMain);
-    registerCanonHandlers(ipcMain);
+    registerCanonHandlers(ipcMain, { dialog });
     registerEpisodeHandlers(ipcMain, episodeStorage);
     registerContextHandlers(ipcMain, episodeStorage);
     registerReviewHandlers(ipcMain, episodeStorage, reviewQueue);

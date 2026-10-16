@@ -7,10 +7,11 @@ const records = require("../database/repositories/canon-record-repository.cjs");
 const aliases = require('../database/repositories/canon-alias-repository.cjs');
 
 /**
- * Canon lifecycle, 정의 조회와 범위 검증을 수행하는 Record API를 Result 계약으로 한 번만 등록한다.
+ * Canon lifecycle·Record API와 분리된 Staging/승인 API를 Result 계약으로 한 번만 등록한다.
  */
-function registerCanonHandlers(ipcMain) {
+function registerCanonHandlers(ipcMain, options = {}) {
   if (registeredIpcMains.has(ipcMain)) return;
+  require('./canon-staging-handlers.cjs').registerCanonStagingHandlers(ipcMain, options);
   const recordActions = [
     [IPC_CHANNELS.CANON_ALIAS_LIST, aliases.list],
     [IPC_CHANNELS.CANON_ALIAS_CREATE, aliases.create],

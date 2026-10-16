@@ -201,9 +201,19 @@ function buildMergedZip(root, incomingDirectory, current, incoming, plan, destin
   return output;
 }
 
-/** 검증된 ZIP과 현재 DB를 격리 비교하고 충돌이 없을 때만 실행 가능한 ZIP을 준비한다. */
+/** Staging 양방향 병합이 없는 V1은 어느 쪽에든 Import가 있으면 업데이트를 명시적으로 거부한다. */
+function assertStagingUpdateSupported(databaseFile) {
+  const db = new DatabaseSync(databaseFile, { readOnly: true });
+  try {
+    if (db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'canon_staging_imports'").get() && db.prepare('SELECT 1 FROM canon_staging_imports LIMIT 1').get()) fail('UPDATE_STAGING_UNSUPPORTED', '등록 대기 Canon Import가 있는 데이터의 변경사항 업데이트는 V1에서 지원하지 않습니다. 양측 데이터를 별도 ZIP으로 보관하고 전체 덮어쓰기를 검토해 주세요.');
+  } finally { db.close(); }
+}
+
+/** 검증된 ZIP과 현재 DB를 격리 비교하고 Staging 보호 및 기존 충돌 검사를 모두 통과해야 병합한다. */
 function previewUpdate(root, incomingDirectory, validated, destination, applicationVersion) {
   const currentDatabase = path.join(root, 'novelcompany.db');
+  assertStagingUpdateSupported(currentDatabase);
+  assertStagingUpdateSupported(path.join(incomingDirectory, backup.DB_ENTRY));
   const currentSummary = backup.inspectDatabase(currentDatabase);
   const current = baselineStore.collect(currentDatabase, path.join(root, 'works'));
   const incoming = baselineStore.collect(path.join(incomingDirectory, backup.DB_ENTRY), path.join(incomingDirectory, 'manuscripts'));

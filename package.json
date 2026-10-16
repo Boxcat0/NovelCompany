@@ -6,6 +6,9 @@
   "description": "NovelCompany local-first desktop application",
   "main": "electron/main.cjs",
   "scripts": {
+    "test:canon-staging": "node electron/canon/canon-staging-validation.cjs staging",
+    "test:canon-import": "node electron/canon/canon-staging-validation.cjs import",
+    "test:canon-promotion": "node electron/canon/canon-staging-validation.cjs promotion",
     "test:review-decisions": "node electron/review/review-decisions-validation.cjs",
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on tcp:5173 && electron .\"",
     "start": "electron .",

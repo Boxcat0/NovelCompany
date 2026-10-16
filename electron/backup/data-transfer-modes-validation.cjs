@@ -194,15 +194,15 @@ function oldSchemaCase() {
   const oldZip = path.join(temporary, 'old.zip'); oldPackage(oldZip);
   const originalHash = service.sha256(fs.readFileSync(oldZip));
   const extracted = validated(oldZip, path.join(temporary, 'old-extracted'));
-  assert.equal(extracted.sourceSchemaVersion, 13); assert.equal(extracted.summary.databaseSchemaVersion, 15);
+  assert.equal(extracted.sourceSchemaVersion, 13); assert.equal(extracted.summary.databaseSchemaVersion, 16);
   const root = path.join(temporary, 'old-target'); fs.mkdirSync(root); initializeDatabase(path.join(root, 'novelcompany.db'));
   service.replaceData(root, oldZip, '0.1.0'); service.recoverInterruptedRestore(root); initializeDatabase(path.join(root, 'novelcompany.db'));
-  assert.equal(getDatabase().prepare('SELECT MAX(version) version FROM schema_migrations').get().version, 15);
+  assert.equal(getDatabase().prepare('SELECT MAX(version) version FROM schema_migrations').get().version, 16);
   assert.equal(getDatabase().prepare('SELECT title FROM works').get().title, '구형 작품');
   assert.equal(fs.readFileSync(path.join(root, 'works', ...getDatabase().prepare('SELECT storage_key FROM episodes').get().storage_key.split('/')), 'utf8'), '구형 원고\r\n');
   assert.equal(service.sha256(fs.readFileSync(oldZip)), originalHash);
   closeDatabase();
-  console.log('PASS overwrite: official 013→015 isolated migration, original ZIP unchanged, installed DB/TXT and journal verification');
+  console.log('PASS overwrite: official 013→016 isolated migration, original ZIP unchanged, installed DB/TXT and journal verification');
 }
 
 /** 모든 테스트를 독립 임시 루트에서 실행하고 연결과 파일을 정리한다. */

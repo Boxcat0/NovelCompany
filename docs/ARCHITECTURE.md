@@ -1,10 +1,26 @@
 # NovelCompany 아키텍처
 
+## Task031-EXT01 — Canon Staging & Import V1
+
+기존 ConceptScreen의 작품/CanonSpace 아래 `등록 대기 Canon`을 둔다. Main 파일 선택 → 읽기 전용 JSON Preview → 작가 확인 → Staging Import와, 후보 선택 → Promotion Preview → 작가 최종 확인 → 공식 Canon 등록을 별개 작업으로 제공한다. self-contained sandbox Preload의 `canon.staging`만 사용하며 Renderer가 임의 경로를 전달할 수 없다. 기존 Task031 미커밋 변경을 보존한다.
+
+`canon-import.cjs`는 4 MiB/2,000후보/깊이24/100,000노드 한도, UTF-8·JSON 타입·위험 키·중복 draft_key를 검사한다. 원본 bytes의 SHA-256과 전체 스냅샷/추가 메타데이터를 보존한다. `canon-staging-repository`는 매 요청 Work/CanonSpace 소속과 revision을 검사한다. 동일 SHA는 중복 생성하지 않고, 원본이 달라진 동일 논리키는 수정 없음/작가 수정/이미 승인됨을 구분해 충돌로 중단한다. V1은 이를 자동 갱신하거나 3-way merge하지 않는다.
+
+상태는 현재 실제 Definition과 Repository 검증으로 계산한다. 미확정 값을 임시 저장할 수 있지만 필수값은 완화하지 않는다. 원본 또는 수정본의 author_private가 true면 Promotion을 차단하며 원본의 비공개 지정을 수정 UI로 해제할 수 없다. Staging 전부는 일반 Canon 목록/Selector/Alias/FULL/Relevant Context/ReviewJob/Rule 입력에서 제외한다. Staging 수정은 공식 Canon fingerprint와 TXT를 바꾸지 않는다.
+
+Promotion Preview는 Canon 테이블의 독립 메모리 복제본에서 기존 Record Repository를 실행한다. 운영 DB에 INSERT/rollback하는 미리보기가 아니다. 의존성 순서로 논리키→실제 UUID를 해석하고, 순환/미해결/다른 공간 참조·필수값·UNIQUE Passive·자기 계약/관계를 검증한다. 실제 실행은 BEGIN IMMEDIATE 아래 기존 Repository의 savepoint를 사용해 등록 및 승인 연결을 함께 확정한다. 하나라도 실패하면 전체 rollback한다. 같은 분류의 동명 신규 생성은 보수적으로 차단하고, 작가가 직접 선택한 기존 항목의 이름/필드/참조가 정확히 일치할 때만 읽기 검증 후 연결한다. 기존 Record를 수정하지 않으며 다른 Set의 동명 후보는 독립적으로 등록할 수 있다.
+
+Preview token은 창/작품/작업 종류에 묶고 5분 후 만료된다. 최종 실행 때 후보 revision과 Canon/Definition/Staging fingerprint를 다시 확인한다. QUEUED/RUNNING 검토가 있는 작품은 Promotion을 거부하고 기존 Main data gate도 유지한다. 후보 폼은 기존 CanonFieldRenderer를 재사용하며 미저장 이동/중복 저장/지연 응답/StrictMode를 보호한다. 후보 원문·비공개 내용·선택 파일 경로를 일반 오류 로그에 첨부하지 않는다.
+
+Schema 016 전체 ZIP은 Import 스냅샷과 수정 revision, 비공개 표시, Promotion UUID를 포함한다. 공식 015 ZIP은 격리 사본에 016을 적용한다. HF03-B는 어느 한쪽에라도 Staging Import가 있으면 `UPDATE_STAGING_UNSUPPORTED`로 전체 중단한다. 양방향 Staging 병합을 구현하지 않으며 실제 두 PC 간 가져오기 문제는 계속 보류한다. 실제 5차 원본 파일은 제공되지 않아 168개/비공개8개 및 소설별 내용 검증은 NOT VERIFIED다. 가상 168개 Fixture만 개발 검증에 사용한다.
+
 ## Task031 — ReviewFinding과 독립적인 작가 판단
 
 기존 ReviewResultViewer 안에서 Finding 원본과 작가 판단을 구분한다. `FindingDecisionEditor` → sandbox Preload `reviews.decisions` → `registerReviewHandlers` → `review-decision-repository` → Schema 015의 append-only 이벤트 순서로 저장한다. Main의 기존 data-operation gate를 적용하고 Work/Episode/Run/Finding 소속을 Repository에서 검증한다. ReviewJob과 Episode 편집 잠금 상태를 판단 상태로 재사용하지 않는다.
 
 Run별 최신 판단을 한 번에 조회하며 선택한 Finding만 이력을 조회한다. `expectedRevision`과 `BEGIN IMMEDIATE`로 동시 저장을 거부하고 동일 상태·메모는 no-op 처리한다. UI는 저장 중 중복 입력, 미저장 화면/회차/Finding/필터 이동, 늦은 응답의 화면 덮어쓰기를 보호한다. Review polling/새로고침은 판단 편집기를 unmount하지 않는다. 메모는 HTML이 아닌 일반 텍스트다.
+
+판단 편집기의 effect 정리는 요청 sequence를 무효화하고 pending 잠금을 해제한다. 개발 모드 StrictMode의 setup → cleanup → setup에서도 새 이력 조회를 시작하며, 이전 응답은 화면에 적용하지 않는다. 실제 Repository의 저장 결과를 지연시킨 Electron 검증으로 응답 대기 중 화면·회차·필터 이동 차단도 확인한다.
 
 Freshness는 기존 TXT/Canon fingerprint로 계산한다. 판단 이벤트는 fingerprint, ReviewRun/Finding/Job, TXT, Canon을 변경하지 않는다. STALE/UNAVAILABLE에도 안내 후 판단을 기록할 수 있다. 재검토 결과는 새 Finding이므로 과거 판단을 승계하지 않는다. Legacy와 Finding 없는 STUB도 유지한다. RESOLVED는 작가 선언이며 자동 해결 검증이 아니다.
 

@@ -69,9 +69,10 @@ function expectError(action, code) {
 function validateCanonDeletion(temporaryRoot) {
   const db = getDatabase();
   const tables = scopedTables();
-  assert.equal(tables.length, 21, "Re-audit new Canon tables before extending deletion");
+  assert.equal(tables.length, 23, "Re-audit new Canon tables before extending deletion");
   // 실제 FK graph도 읽으며 테스트 fixture가 존재하는 부모와 연결되는지 검사한다.
-  for (const table of tables) assert.ok(db.prepare(`PRAGMA foreign_key_list("${table}")`).all().every((fk) => fk.on_delete === "RESTRICT"));
+  for (const table of tables) assert.ok(db.prepare(`PRAGMA foreign_key_list("${table}")`).all().every((fk) => fk.on_delete === (table.startsWith('canon_staging_') ? 'CASCADE' : 'RESTRICT')));
+  assert.deepEqual(db.prepare('PRAGMA foreign_key_list(canon_staging_promotions)').all().map(fk => fk.on_delete).sort(), ['CASCADE', 'CASCADE', 'SET NULL']);
   for (const action of [canon.getCanonDeletionStatus, canon.deleteCanonForWork]) {
     for (const id of [null, 42, "", " "]) expectError(() => action(id), "WORK_ID_REQUIRED");
     expectError(() => action("missing-work"), "WORK_NOT_FOUND");
@@ -103,6 +104,7 @@ function validateCanonDeletion(temporaryRoot) {
       recordCount: generic ? 3 : 0, optionCount: generic ? 4 : 0, fieldCount: generic ? 33 : 0,
       setCount: generic ? 12 : 0, legacyDataCount: legacy ? 15 : 0,
       aliasCount: 0,
+      stagingRowCount: 0,
       totalDependentRowCount: (generic ? 55 : 0) + (legacy ? 15 : 0),
     });
     const readSnapshot = databaseSnapshot();
@@ -141,7 +143,7 @@ function validateCanonDeletion(temporaryRoot) {
   assert.deepEqual([db.prepare("SELECT * FROM app_settings").all(), db.prepare("SELECT * FROM schema_migrations").all()], settingsAndMigrations);
   assert.equal(db.prepare("PRAGMA foreign_keys").get().foreign_keys, 1);
   assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
-  console.log("Task020 Canon deletion: all 21 dependent tables, isolation, rollback, stale counts, Episode/TXT preservation passed.");
+  console.log("Task020 Canon deletion: all scoped tables including Staging, isolation, rollback, stale counts, Episode/TXT preservation passed.");
 }
 
 /** 양쪽 bridge, 동시 삭제, Work 삭제 충돌 및 한국어 오류/원본 은닉을 실제 handler로 검증한다. */

@@ -1,4 +1,12 @@
 const IPC_CHANNELS = Object.freeze({
+  CANON_STAGING_LIST: 'canon:staging:list',
+  CANON_STAGING_GET: 'canon:staging:get',
+  CANON_STAGING_UPDATE: 'canon:staging:update',
+  CANON_STAGING_PREVIEW_IMPORT: 'canon:staging:preview-import',
+  CANON_STAGING_IMPORT: 'canon:staging:import',
+  CANON_STAGING_PREVIEW_PROMOTION: 'canon:staging:preview-promotion',
+  CANON_STAGING_PROMOTE: 'canon:staging:promote',
+  CANON_STAGING_CANCEL_PREVIEW: 'canon:staging:cancel-preview',
   REVIEW_DECISIONS_LIST: 'reviews:decisions:list',
   REVIEW_DECISIONS_HISTORY: 'reviews:decisions:history',
   REVIEW_DECISIONS_APPEND: 'reviews:decisions:append',

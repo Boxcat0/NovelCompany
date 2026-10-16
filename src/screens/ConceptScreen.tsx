@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CharacterAliasManager } from '../components/CharacterAliasManager';
+import { CanonStagingPanel } from '../components/CanonStagingPanel';
 import DynamicCanonForm, { validateCanonForm } from "../components/DynamicCanonForm";
 import type { CanonDeletionStatus, CanonRecord, CanonRecordInput, CanonRecordSummary, CanonScope, CanonSpace, CanonSet, CanonSetDefinition, CreateReadiness, IpcResult, ReferenceOption, StoredWork } from "../types/electron-api";
 
@@ -40,7 +41,7 @@ function canonDeletionMessage(title: string, status: CanonDeletionStatus): strin
   const summary = status.totalDependentRowCount === 0
     ? "현재 등록된 Canon 설정 데이터는 없습니다.\nCanonSpace가 삭제되며 이후 다시 Canon을 시작할 수 있습니다."
     : `Canon Set: ${status.setCount}개\nCanon Field: ${status.fieldCount}개\nCanon Record: ${status.recordCount}개\n기타 연결·기존 Canon 데이터: ${status.totalDependentRowCount - status.setCount - status.fieldCount - status.recordCount}행\n\n연결된 Canon 데이터도 함께 삭제됩니다.`;
-  return `'${title}'의 Canon 전체를 삭제하시겠습니까?\n\n${summary}\n\n작품과 회차, 원고 파일은 유지됩니다.\n이 작업은 되돌릴 수 없습니다.`;
+  return `'${title}'의 Canon 전체를 삭제하시겠습니까?\n\n${summary}${status.stagingRowCount > 0 ? `\n등록 대기 Import·후보·승인 기록: ${status.stagingRowCount}행도 삭제됩니다.` : ''}\n\n작품과 회차, 원고 파일은 유지됩니다.\n이 작업은 되돌릴 수 없습니다.`;
 }
 
 /** 실제 Definition을 입력 그룹과 준비 상태로 안내하고 기존 lifecycle 및 동적 Record CRUD를 연결한다. */
@@ -63,11 +64,15 @@ function ConceptScreen({ onNavigationState }: { onNavigationState?: (dirty: bool
   const [actionBusy, setBusy] = useState(true);
   const [aliasDirty, setAliasDirty] = useState(false);
   const [aliasBusy, setAliasBusy] = useState(false);
+  const [showStaging, setShowStaging] = useState(false);
+  const [stagingDirty, setStagingDirty] = useState(false), [stagingBusy, setStagingBusy] = useState(false);
+  /** 등록 대기 편집과 저장을 기존 작품·화면 이동 보호에 포함한다. */
+  const handleStagingState = useCallback((dirty: boolean, busy: boolean) => { setStagingDirty(dirty); setStagingBusy(busy); }, []);
   /** Alias draft와 쓰기 상태를 Character 입력 손실 및 이동 보호에 연결한다. */
   const handleAliasState = useCallback((dirty: boolean, busy: boolean) => { setAliasDirty(dirty); setAliasBusy(busy); }, []);
   const [setLoading, setSetLoading] = useState(false);
   const setRequestId = useRef(0);
-  const busy = actionBusy || setLoading || aliasBusy;
+  const busy = actionBusy || setLoading || aliasBusy || stagingBusy;
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const mounted = useRef(true);
@@ -92,17 +97,17 @@ function ConceptScreen({ onNavigationState }: { onNavigationState?: (dirty: bool
   }, []);
 
   // 화면의 활성 상태와 App 이동 보호 ref를 같은 commit에 맞춰 완료 직후 이동도 허용한다.
-  useLayoutEffect(() => { onNavigationState?.(dirty || aliasDirty, busy); }, [dirty, aliasDirty, busy, onNavigationState]);
+  useLayoutEffect(() => { onNavigationState?.(dirty || aliasDirty || stagingDirty, busy); }, [dirty, aliasDirty, stagingDirty, busy, onNavigationState]);
   useEffect(() => {
     /** 창 종료 시 저장 전 변경사항의 손실을 확인한다. */
-    function beforeUnload(event: BeforeUnloadEvent) { if (dirty || aliasDirty || busy) { event.preventDefault(); event.returnValue = ""; } }
+    function beforeUnload(event: BeforeUnloadEvent) { if (dirty || aliasDirty || stagingDirty || busy) { event.preventDefault(); event.returnValue = ""; } }
     window.addEventListener("beforeunload", beforeUnload);
     return () => window.removeEventListener("beforeunload", beforeUnload);
-  }, [dirty, aliasDirty, busy]);
+  }, [dirty, aliasDirty, stagingDirty, busy]);
 
   /** 쓰기 중 이탈을 막고 입력 폐기를 확인하되 Set 간 읽기는 최신 요청으로 교체할 수 있게 한다. */
   function canLeave(confirmation = "저장하지 않은 변경사항이 있습니다.\n변경 내용을 버리고 이동하시겠습니까?", switchingSet = false) {
-    return !requestPending.current && !actionBusy && !aliasBusy && (!setLoading || switchingSet) && (!(dirty || aliasDirty) || window.confirm(confirmation));
+    return !requestPending.current && !actionBusy && !aliasBusy && !stagingBusy && (!setLoading || switchingSet) && (!(dirty || aliasDirty || stagingDirty) || window.confirm(confirmation));
   }
 
   /** 요청 중 중복 조작을 막고 IPC 실패 또는 통신 오류를 한국어로 표시한다. */
@@ -139,6 +144,7 @@ function ConceptScreen({ onNavigationState }: { onNavigationState?: (dirty: bool
 
   /** 이전 Canon의 선택/폼/참조 ID를 모두 비워 삭제 후 오래된 데이터로 요청하지 않게 한다. */
   function resetCanonEditor() {
+    setShowStaging(false); setStagingDirty(false); setStagingBusy(false);
     setAliasDirty(false); setAliasBusy(false);
     setRequestId.current++; setSetLoading(false);
     setCanonSpace(null); setSpaceLoaded(false); setSets([]); setDefinition(null);
@@ -192,8 +198,8 @@ function ConceptScreen({ onNavigationState }: { onNavigationState?: (dirty: bool
     });
   }
   /** Set 선택 시 폼을 비우고 정의/레코드/준비 상태의 최신 요청만 적용한다. */
-  async function handleSelectSet(set: CanonSet) {
-    if (!canLeave(undefined, true)) return;
+  async function handleSelectSet(set: CanonSet, alreadyConfirmed = false) {
+    if (!alreadyConfirmed && !canLeave(undefined, true)) return;
     const requestId = ++setRequestId.current;
     setSetLoading(true); onNavigationState?.(false, true);
     setAliasDirty(false); setAliasBusy(false);
@@ -206,6 +212,17 @@ function ConceptScreen({ onNavigationState }: { onNavigationState?: (dirty: bool
     } catch (cause) {
       if (mounted.current && requestId === setRequestId.current) setError(cause instanceof CanonRequestError ? cause.message : "설정 분류를 불러오지 못했습니다.");
     } finally { if (mounted.current && requestId === setRequestId.current) setSetLoading(false); }
+  }
+
+  /** Staging 전환의 미저장을 확인하고 공식 관리로 돌아올 때 목록과 readiness를 새로 읽는다. */
+  function handleToggleStaging() {
+    if (!canLeave()) return;
+    setInput(null); setRecordId(null); setAliasDirty(false); setStagingDirty(false);
+    if (!showStaging) { setShowStaging(true); return; }
+    setShowStaging(false);
+    const target = sets.find(set => set.id === definition?.id);
+    if (target) void handleSelectSet(target, true);
+    else void runAction(() => refreshReadiness(sets));
   }
 
   /** 부족한 참조 분류로 같은 작품 안에서 이동하며 기존 dirty 확인을 재사용한다. */
@@ -281,7 +298,7 @@ function ConceptScreen({ onNavigationState }: { onNavigationState?: (dirty: bool
     {message && <p role="status">{message}</p>}
     {busy && <p role="status">{deletingCanon ? "Canon 삭제 정보를 확인하거나 삭제하는 중입니다." : startingCanon ? "Canon을 생성하는 중입니다." : "불러오거나 처리하는 중입니다."}</p>}
     {!work ? <ul className="work-list">{works.map((item) => <li className="work-card" key={item.id}><button disabled={busy} className="work-card-button" onClick={() => void handleSelectWork(item)}>{item.title}</button></li>)}{!busy && works.length === 0 && <li>등록된 작품이 없습니다.</li>}</ul> : <>
-      <button disabled={busy} className="back-button" onClick={() => { if (canLeave()) { setWork(null); setDefinition(null); setInput(null); setError(""); setMessage(""); } }}>← 작품 선택</button>
+      <button disabled={busy} className="back-button" onClick={() => { if (canLeave()) { setShowStaging(false); setWork(null); setDefinition(null); setInput(null); setError(""); setMessage(""); } }}>← 작품 선택</button>
       {spaceLoaded && !canonSpace && <div className="work-card canon-empty-state">
         <h2>아직 이 작품의 Canon 설정이 없습니다.</h2>
         <p>Canon을 시작하면 이 작품만의 설정 구조를 만들 수 있습니다.</p>
@@ -291,7 +308,9 @@ function ConceptScreen({ onNavigationState }: { onNavigationState?: (dirty: bool
         <h2>아직 등록된 Canon Set이 없습니다.</h2>
         <p>입력에 필요한 설정 구조가 없습니다. 현재는 기존 구조가 있는 작품에서 항목을 등록할 수 있습니다. 구조 편집과 복사는 후속 기능입니다.</p>
       </div>}
-      {spaceLoaded && canonSpace && sets.length > 0 && <div className="canon-manager">
+      {spaceLoaded && canonSpace && sets.length > 0 && <button type="button" disabled={busy} onClick={handleToggleStaging}>{showStaging ? '공식 Canon 관리' : '등록 대기 Canon'}</button>}
+      {spaceLoaded && canonSpace && showStaging && <CanonStagingPanel key={work.id + ':' + canonSpace.id} scope={{ workId: work.id, canonSpaceId: canonSpace.id }} onStateChange={handleStagingState} onOpenCanon={setId => { const target = sets.find(set => set.id === setId); if (target && canLeave()) { setShowStaging(false); void handleSelectSet(target); } }} />}
+      {spaceLoaded && canonSpace && sets.length > 0 && !showStaging && <div className="canon-manager">
         <nav aria-label="설정 분류">{buildCanonAuthoringGroups(sets).map((group) => <section className="canon-authoring-group" key={group.label}><h3>{group.label}</h3>{group.sets.map((set) => <button key={set.id} disabled={actionBusy} className={"concept-set-button" + (definition?.id === set.id ? " is-selected" : "")} onClick={() => void handleSelectSet(set)}><span>{set.name}</span><small>{readinessLabel(readiness[set.id])}</small></button>)}</section>)}</nav>
         <div className="canon-record-list">
           {definition ? <><h2>{definition.name}</h2><button disabled={busy || !readiness[definition.id]?.canCreate} onClick={() => void handleOpenRecord(null)}>+ 새 항목</button>

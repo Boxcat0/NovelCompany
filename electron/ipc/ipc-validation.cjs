@@ -377,6 +377,8 @@ async function runValidation() {
       "getEpisodeReviewContext",
     ]);
     assert.deepEqual(Object.keys(runtimePreloadApi.reviews), ["start", "submit", "getQueue", "getJobByEpisode", "cancelQueued", "getByEpisode", "getById", "decisions"]);
+    await validateDecisionBridge(ipcMain, runtimePreloadApi);
+    await validateStagingBridge(runtimePreloadApi);
     assert.equal("ipcRenderer" in runtimePreloadApi, false);
     assert.equal("require" in runtimePreloadApi, false);
 
@@ -481,6 +483,53 @@ async function validateCanonRecordIpc(ipcMain, runtimeApi) {
   assert.equal((await api.canon.records.delete(scope.world, id)).data.id, id);
   expectFailure(await api.canon.records.getById(scope.world, id), "CANON_RECORD_NOT_FOUND", "해당 설정 항목을 찾을 수 없습니다.");
   expectFailure(await api.canon.records.create(scope.world, { displayName: "", fieldValues: {} }), "CANON_REQUIRED_FIELD_MISSING", "이름을 입력해 주세요.");
+}
+
+/** 두 Preload의 판단 API channel·입력 보존과 실제 Main의 잘못된 입력 거부를 검사한다. */
+async function validateDecisionBridge(ipcMain, runtimeApi) {
+  const scope = { workId: 'missing-work', episodeId: 'missing-episode', reviewRunId: 'missing-run', findingId: 'missing-finding' };
+  const cases = [
+    ['listForRun', IPC_CHANNELS.REVIEW_DECISIONS_LIST, scope],
+    ['history', IPC_CHANNELS.REVIEW_DECISIONS_HISTORY, scope],
+    ['append', IPC_CHANNELS.REVIEW_DECISIONS_APPEND, { ...scope, decisionStatus: 'NEEDS_FIX', note: '메모', expectedRevision: 0 }],
+  ];
+  assert.deepEqual(Object.keys(runtimeApi.reviews.decisions), cases.map(([method]) => method));
+  for (const [method, channel, input] of cases) {
+    const result = await runtimeApi.reviews.decisions[method](input);
+    assert.equal(result.data.channel, channel); assert.equal(JSON.stringify(result.data.args), JSON.stringify([input]));
+    const bridge = createNovelCompanyApi({
+      /** 보조 bridge 입력을 실제 등록된 Main handler에 그대로 전달한다. */
+      invoke(actualChannel, ...args) { assert.equal(actualChannel, channel); assert.deepEqual(args, [input]); return ipcMain.handlers.get(actualChannel)(null, ...args); },
+    });
+    const failed = await bridge.reviews.decisions[method](input);
+    assert.equal(failed.ok, false); assert.equal(failed.error.code, 'REVIEW_DECISION_NOT_FOUND');
+    assert.match(failed.error.message, /[가-힣]/); assert.deepEqual(Object.keys(failed.error), ['code', 'message']);
+  }
+}
+
+/** sandbox runtime와 보조 Preload의 Staging 8개 API가 동일 channel·전체 인자를 전달하는지 검사한다. */
+async function validateStagingBridge(runtimeApi) {
+  const scope = { workId: 'work', canonSpaceId: 'space' };
+  const cases = [
+    ['list', IPC_CHANNELS.CANON_STAGING_LIST, [scope]],
+    ['get', IPC_CHANNELS.CANON_STAGING_GET, [scope, 'candidate']],
+    ['update', IPC_CHANNELS.CANON_STAGING_UPDATE, [scope, 'candidate', { expectedRevision: 1, fields: {}, references: {}, displayName: '가상 후보', authorPrivate: false }]],
+    ['previewImport', IPC_CHANNELS.CANON_STAGING_PREVIEW_IMPORT, [scope]],
+    ['import', IPC_CHANNELS.CANON_STAGING_IMPORT, [scope, 'token', true]],
+    ['previewPromotion', IPC_CHANNELS.CANON_STAGING_PREVIEW_PROMOTION, [scope, [{ id: 'candidate', expectedRevision: 1 }]]],
+    ['promote', IPC_CHANNELS.CANON_STAGING_PROMOTE, [scope, 'token', true]],
+    ['cancelPreview', IPC_CHANNELS.CANON_STAGING_CANCEL_PREVIEW, []],
+  ];
+  assert.deepEqual(Object.keys(runtimeApi.canon.staging), cases.map(([method]) => method));
+  for (const [method, channel, args] of cases) {
+    const result = await runtimeApi.canon.staging[method](...args);
+    assert.equal(result.data.channel, channel); assert.equal(JSON.stringify(result.data.args), JSON.stringify(args));
+    const bridge = createNovelCompanyApi({
+      /** 보조 bridge도 동일한 channel과 모든 승인·scope 인자를 보존한다. */
+      invoke(actualChannel, ...actualArgs) { assert.equal(actualChannel, channel); assert.deepEqual(actualArgs, args); return Promise.resolve({ ok: true, data: null }); },
+    });
+    await bridge.canon.staging[method](...args);
+  }
 }
 
 /** Work 6개 API의 handler, 두 preload 계약, 한국어 실패 및 내부 오류 은닉을 검사한다. */
